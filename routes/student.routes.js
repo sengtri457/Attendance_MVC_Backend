@@ -14,6 +14,7 @@ const {
 const { upload, handleMulterError } = require("../middlewares/uploard");
 router.get("", studentController.getAllStudents);
 router.get("/:id", idValidation, studentController.getStudentById);
+router.get("/:id/detail", idValidation, studentController.getStudentDetail);
 router.post("", studentValidation.create, studentController.createStudent);
 router.put(
   "/:id",

@@ -51,8 +51,6 @@ router.get("/reports/class", attendanceController.getClassSummary);
 // GET /attendance/reports/monthly?year=2024&month=1&class_id=1
 router.get("/reports/monthly", attendanceController.getMonthlyCalendar);
 
-// ==================== EXPORT ROUTES ====================
-
 // Export weekly grid to CSV
 // GET /attendance/export/weekly-csv?start_date=2024-01-15&end_date=2024-01-19&class_id=1
 //

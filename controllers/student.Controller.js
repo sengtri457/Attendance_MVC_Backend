@@ -2,7 +2,9 @@ const Student = require("../models/Student");
 const Teacher = require("../models/Teacher");
 const Class = require("../models/Class");
 const Subject = require("../models/Subject");
+const Attendance = require("../models/Attendance");
 const { validationResult } = require("express-validator");
+const sequelize = require("../config/database");
 const { Op } = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
@@ -75,8 +77,7 @@ class StudentController {
       });
     }
   }
-
-  // Get student by ID
+  // Get student by ID (simple - no nested includes)
   async getStudentById(req, res) {
     try {
       const { id } = req.params;
@@ -86,10 +87,7 @@ class StudentController {
           {
             model: Class,
             as: "class",
-            include: [
-              { model: Subject, as: "subject" },
-              { model: Teacher, as: "teacher" },
-            ],
+            attributes: ["class_id"],
           },
         ],
       });
@@ -110,6 +108,120 @@ class StudentController {
       res.status(500).json({
         success: false,
         message: "Error fetching student",
+        error: error.message,
+      });
+    }
+  }
+
+  // Get student detail with attendance summary
+  async getStudentDetail(req, res) {
+    try {
+      const { id } = req.params;
+      const { start_date, end_date } = req.query;
+
+      // Get student with class info
+      const student = await Student.findByPk(id, {
+        include: [
+          {
+            model: Class,
+            as: "class",
+            attributes: ["class_id", "class_code"],
+          },
+        ],
+      });
+
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          message: "Student not found",
+        });
+      }
+
+      // Calculate date range (default: last 30 days)
+      const endDate = end_date || new Date().toISOString().split("T")[0];
+      const startDate =
+        start_date ||
+        (() => {
+          const date = new Date();
+          date.setDate(date.getDate() - 30);
+          return date.toISOString().split("T")[0];
+        })();
+
+      // Get attendance summary
+      const attendanceStats = await Attendance.findAll({
+        where: {
+          student_id: id,
+          attendance_date: {
+            [Op.between]: [startDate, endDate],
+          },
+        },
+        attributes: [
+          "status",
+          [sequelize.fn("COUNT", sequelize.col("status")), "count"],
+        ],
+        group: ["status"],
+        raw: true,
+      });
+
+      const statusCounts = {
+        P: 0,
+        A: 0,
+        L: 0,
+        E: 0,
+      };
+
+      attendanceStats.forEach((stat) => {
+        statusCounts[stat.status] = parseInt(stat.count);
+      });
+
+      const totalDays = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+      const attendanceRate =
+        totalDays > 0
+          ? ((statusCounts.P / totalDays) * 100).toFixed(1) + "%"
+          : "0%";
+
+      // Get recent attendance records
+      const recentAttendance = await Attendance.findAll({
+        where: {
+          student_id: id,
+          attendance_date: {
+            [Op.between]: [startDate, endDate],
+          },
+        },
+        include: [
+          {
+            model: Subject,
+            as: "subject",
+            attributes: ["subject_id", "subject_name"],
+          },
+        ],
+        order: [["attendance_date", "DESC"]],
+        limit: 10,
+      });
+
+      // Build response
+      const studentDetail = {
+        ...student.toJSON(),
+        attendance_summary: {
+          total_days: totalDays,
+          present: statusCounts.P,
+          absent: statusCounts.A,
+          late: statusCounts.L,
+          excused: statusCounts.E,
+          attendance_rate: attendanceRate,
+        },
+        recent_attendance: recentAttendance,
+      };
+
+      res.status(200).json({
+        success: true,
+        data: studentDetail,
+      });
+    } catch (error) {
+      console.error("Get student detail error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error fetching student details",
         error: error.message,
       });
     }
@@ -145,7 +257,6 @@ class StudentController {
           {
             model: Class,
             as: "class",
-            include: [{ model: Teacher, as: "teachers" }],
           },
         ],
       });
@@ -310,7 +421,6 @@ class StudentController {
               {
                 model: Class,
                 as: "class",
-                include: [{ model: Teacher, as: "teachers" }],
               },
             ],
           });

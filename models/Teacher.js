@@ -13,14 +13,6 @@ const Teacher = sequelize.define(
       allowNull: false,
       comment: "Teacher name in English",
     },
-    email: {
-      type: Sequelize.STRING(100),
-      allowNull: true,
-      unique: true,
-      validate: {
-        isEmail: true,
-      },
-    },
     phone: {
       type: Sequelize.STRING(20),
       allowNull: true,
