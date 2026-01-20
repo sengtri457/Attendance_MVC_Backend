@@ -1,10 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const attendanceController = require("../controllers/attendance.Controller");
-const {
-  validateAttendance,
-  validateBulkAttendance,
-} = require("../middlewares/validation");
+const {validateAttendance, validateBulkAttendance} = require("../middlewares/validation");
 
 // ==================== CRUD ROUTES ====================
 
@@ -18,11 +15,7 @@ router.get("/:id", attendanceController.getAttendanceById);
 router.post("/", validateAttendance, attendanceController.createAttendance);
 
 // Bulk create attendance
-router.post(
-  "/bulk",
-  validateBulkAttendance,
-  attendanceController.bulkCreateAttendance,
-);
+router.post("/bulk", validateBulkAttendance, attendanceController.bulkCreateAttendance,);
 
 // Update attendance
 router.put("/:id", validateAttendance, attendanceController.updateAttendance);
@@ -51,13 +44,9 @@ router.get("/reports/class", attendanceController.getClassSummary);
 // GET /attendance/reports/monthly?year=2024&month=1&class_id=1
 router.get("/reports/monthly", attendanceController.getMonthlyCalendar);
 
-// Export weekly grid to CSV
-// GET /attendance/export/weekly-csv?start_date=2024-01-15&end_date=2024-01-19&class_id=1
-//
-router.get("/export/weekly-csv", attendanceController.exportWeeklyGridCSV);
-router.get(
-  "/reports/weekly-grid",
-  attendanceController.getWeeklyGridMultiSubject,
-);
+// Export weekly grid to Excel
+// GET /attendance/export/weekly-excel?start_date=2024-01-15&end_date=2024-01-19&class_id=1
+router.get("/export/weekly-excel", attendanceController.exportWeeklyGridExcel);
+router.get("/reports/weekly-grid", attendanceController.getWeeklyGridMultiSubject,);
 router.get("/reports/dashboard", attendanceController.getDashboardSummary);
 module.exports = router;
