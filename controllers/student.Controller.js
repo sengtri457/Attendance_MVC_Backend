@@ -9,6 +9,8 @@ const {Op} = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
 const path = require("path");
+const {parse} = require('csv-parse/sync');
+
 function excelDateToJSDate(excelDate) {
     if (! excelDate) 
         return null;
@@ -298,28 +300,53 @@ class StudentController { // Get all students
             });
         }
     }
-    // Upload Excel and Insert Students (with detailed feedback)
     async uploadExcelAndInsert(req, res) {
         try { // Check if file exists
             if (!req.file) {
                 return res.status(400).json({success: false, message: "No file uploaded"});
             }
 
-            // Read the uploaded Excel file
             const filePath = req.file.path;
-            const workbook = xlsx.readFile(filePath);
+            const fileExtension = path.extname(req.file.originalname).toLowerCase();
+            let data = [];
 
-            // Get the first sheet
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
+            // Read file based on type
+            if (fileExtension === '.csv') { // Read CSV file with UTF-8 encoding for Khmer characters
+                const fileBuffer = fs.readFileSync(filePath);
 
-            // Convert sheet to JSON
-            const data = xlsx.utils.sheet_to_json(worksheet);
+                // Try to detect and handle BOM (Byte Order Mark)
+                let fileContent;
+                if (fileBuffer[0] === 0xEF && fileBuffer[1] === 0xBB && fileBuffer[2] === 0xBF) { // UTF-8 with BOM
+                    fileContent = fileBuffer.toString('utf8').substring(1);
+                } else {
+                    fileContent = fileBuffer.toString('utf8');
+                }
+
+                // Parse CSV with proper encoding
+                const workbook = xlsx.read(fileContent, {
+                    type: 'string',
+                    raw: false,
+                    codepage: 65001 // UTF-8 codepage
+                });
+
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                data = xlsx.utils.sheet_to_json(worksheet, {defval: ''});
+
+            } else { // Read Excel file (.xlsx, .xls)
+                const workbook = xlsx.readFile(filePath, {
+                    cellText: false,
+                    cellDates: true
+                });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                data = xlsx.utils.sheet_to_json(worksheet, {defval: ''});
+            }
 
             // Validate data
             if (data.length === 0) {
                 fs.unlinkSync(filePath);
-                return res.status(400).json({success: false, message: "Excel file is empty"});
+                return res.status(400).json({success: false, message: "File is empty"});
             }
 
             // Normalize column names (trim and lowercase)
@@ -327,19 +354,22 @@ class StudentController { // Get all students
                 const normalized = {};
                 for (let key in row) {
                     const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_");
-                    normalized[normalizedKey] = row[key];
+                    // Ensure values are properly encoded
+                    normalized[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
                 }
                 return normalized;
             });
 
-            // Insert data into database
+            // Insert data into database// Validate required fields
             const results = {
                 success: [],
-                failed: []
+                failed: [],
+                duplicates: []
             };
+            // Validate required fields
 
             for (let row of normalizedData) {
-                try { // Validate required fields
+                try {
                     if (! row.class_id && ! row.classid) {
                         throw new Error("class_id is required");
                     }
@@ -350,12 +380,21 @@ class StudentController { // Get all students
                         throw new Error("student_name_eng is required");
                     }
 
+                    const classId = row.class_id || row.classid;
+                    const studentNameKh = (row.student_name_kh || row.name_kh || row.namekh);
+                    const studentNameEng = (row.student_name_eng || row.name_eng || row.nameeng);
+
+                    // Log to verify encoding (remove after testing)
+                    console.log('Processing student:', {
+                        nameKh: studentNameKh,
+                        nameEng: studentNameEng,
+                        buffer: Buffer.from(studentNameKh, 'utf8')
+                    });
+
                     // Check if class exists
-                    const classExists = await Class.findByPk(row.class_id || row.classid);
+                    const classExists = await Class.findByPk(classId);
                     if (! classExists) {
-                        throw new Error(`Class ID ${
-                            row.class_id || row.classid
-                        } not found`,);
+                        throw new Error(`Class ID ${classId} not found`);
                     }
 
                     // Validate gender if provided
@@ -364,13 +403,21 @@ class StudentController { // Get all students
                         throw new Error("Gender must be M, F, or O");
                     }
 
-                    // Create student
-                    const student = await Student.create({
-                        class_id: row.class_id || row.classid,
-                        student_name_kh: row.student_name_kh || row.name_kh || row.namekh,
-                        student_name_eng: row.student_name_eng || row.name_eng || row.nameeng,
-                        gender: gender
+                    // Check for duplicate student (by Khmer name and class)
+                    const existingStudent = await Student.findOne({
+                        where: {
+                            student_name_kh: studentNameKh,
+                            class_id: classId
+                        }
                     });
+
+                    if (existingStudent) { // Student already exists - skip
+                        results.duplicates.push({row: row, message: `Student '${studentNameKh}' already exists in class ${classId}`, existing_student_id: existingStudent.student_id});
+                        continue;
+                    }
+
+                    // Create student
+                    const student = await Student.create({class_id: classId, student_name_kh: studentNameKh, student_name_eng: studentNameEng, gender: gender});
 
                     // Fetch student with class details
                     const studentWithClass = await Student.findByPk(student.student_id, {
@@ -378,16 +425,18 @@ class StudentController { // Get all students
                             {
                                 model: Class,
                                 as: "class"
-                            },
+                            }
                         ]
                     });
 
                     results.success.push({row: row, student_id: student.student_id, student: studentWithClass});
-                } catch (err) { // Enhanced error logging for validation errors
+
+                } catch (err) {
                     console.error("Row error:", err);
+
                     results.failed.push({
-                        row: row, error: err.message,
-                        // Add validation errors if they exist
+                        row: row,
+                        error: err.message,
                         validationErrors: err.errors ? err.errors.map((e) => ({field: e.path, message: e.message, value: e.value})) : undefined
                     });
                 }
@@ -398,33 +447,33 @@ class StudentController { // Get all students
 
             res.status(200).json({
                 success: true,
-                message: "Excel data processed",
+                message: "File data processed",
                 summary: {
                     total: normalizedData.length,
                     success: results.success.length,
+                    duplicates: results.duplicates.length,
                     failed: results.failed.length
                 },
                 results: results
             });
+
         } catch (err) { // Clean up file if error occurs
             if (req.file && fs.existsSync(req.file.path)) {
                 fs.unlinkSync(req.file.path);
             }
 
-            console.error("Upload Excel error:", err);
+            console.error("Upload file error:", err);
 
-            // Enhanced error response
             res.status(500).json({
                 success: false,
                 message: "Server error",
                 error: err.message,
-                // Add validation details if available
                 validationErrors: err.errors ? err.errors.map((e) => ({field: e.path, message: e.message, value: e.value, type: e.type})) : undefined,
-                // Add full error for debugging (remove in production)
                 debug: process.env.NODE_ENV === "development" ? err.stack : undefined
             });
         }
     }
+
 
     // Bulk Insert (Better Performance for Large Files)
     async uploadExcelBulkInsert(req, res) {

@@ -61,7 +61,7 @@ const teacherroute = require("./routes/teacher.routes");
 const studentroute = require("./routes/student.routes");
 const subjectroute = require("./routes/subject.route");
 const classroute = require("./routes/class.routes");
-const attendanceRoute = require("./routes/attendance.route");
+const attendanceRoute = require("./routes/attendance.routes");
 app.use("/api/v1/teacher", teacherroute);
 app.use("/api/v1/student", studentroute);
 app.use("/api/v1/subject", subjectroute);
