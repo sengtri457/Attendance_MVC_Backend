@@ -11,25 +11,24 @@ const fs = require("fs");
 const path = require("path");
 const {parse} = require('csv-parse/sync');
 
-function excelDateToJSDate(excelDate) {
-    if (! excelDate) 
-        return null;
-    
+// function excelDateToJSDate(excelDate) {
+//     if (! excelDate)
+//         return null;
 
 
-    if (typeof excelDate === "string") {
-        const date = new Date(excelDate);
-        return isNaN(date.getTime()) ? null : date.toISOString().split("T")[0];
-    }
+//     if (typeof excelDate === "string") {
+//         const date = new Date(excelDate);
+//         return isNaN(date.getTime()) ? null : date.toISOString().split("T")[0];
+//     }
 
-    if (typeof excelDate === "number") {
-        const excelEpoch = new Date(1899, 11, 30);
-        const jsDate = new Date(excelEpoch.getTime() + excelDate * 86400000);
-        return jsDate.toISOString().split("T")[0]; // Returns YYYY-MM-DD
-    }
+//     if (typeof excelDate === "number") {
+//         const excelEpoch = new Date(1899, 11, 30);
+//         const jsDate = new Date(excelEpoch.getTime() + excelDate * 86400000);
+//         return jsDate.toISOString().split("T")[0]; // Returns YYYY-MM-DD
+//     }
 
-    return null;
-}
+//     return null;
+// }
 class StudentController { // Get all students
     async getAllStudents(req, res) {
         try {
@@ -321,19 +320,18 @@ class StudentController { // Get all students
                 } else {
                     fileContent = fileBuffer.toString('utf8');
                 }
-
                 // Parse CSV with proper encoding
                 const workbook = xlsx.read(fileContent, {
                     type: 'string',
                     raw: false,
-                    codepage: 65001 // UTF-8 codepage
+                    codepage: 65001
                 });
 
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 data = xlsx.utils.sheet_to_json(worksheet, {defval: ''});
 
-            } else { // Read Excel file (.xlsx, .xls)
+            } else {
                 const workbook = xlsx.readFile(filePath, {
                     cellText: false,
                     cellDates: true
@@ -342,37 +340,47 @@ class StudentController { // Get all students
                 const worksheet = workbook.Sheets[sheetName];
                 data = xlsx.utils.sheet_to_json(worksheet, {defval: ''});
             }
-
             // Validate data
             if (data.length === 0) {
                 fs.unlinkSync(filePath);
                 return res.status(400).json({success: false, message: "File is empty"});
             }
-
             // Normalize column names (trim and lowercase)
             const normalizedData = data.map((row) => {
                 const normalized = {};
                 for (let key in row) {
                     const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_");
-                    // Ensure values are properly encoded
                     normalized[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
                 }
                 return normalized;
             });
+            // cating default class when student have Class Code is Empty
+            let defaultClass = await Class.findOne({
+                where: {
+                    class_code: 'UNASSIGNED'
+                }
+            });
+            // If class doesn't exist, create it
+            if (! defaultClass) {
+                defaultClass = await Class.create({class_code: 'UNASSIGNED', class_name: 'Unassigned Students'});
+            }
 
-            // Insert data into database// Validate required fields
+            if (! defaultClass) {
+                fs.unlinkSync(filePath);
+                return res.status(400).json({success: false, message: "No classes found in database. Please create at least one class first."});
+            }
+
+            // Insert data into database
             const results = {
                 success: [],
                 failed: [],
-                duplicates: []
+                duplicates: [],
+                classesCreated: [],
+                assignedToDefault: []
             };
-            // Validate required fields
 
             for (let row of normalizedData) {
-                try {
-                    if (! row.class_id && ! row.classid) {
-                        throw new Error("class_id is required");
-                    }
+                try { // Validate required student name fields
                     if (! row.student_name_kh && ! row.name_kh && ! row.namekh) {
                         throw new Error("student_name_kh is required");
                     }
@@ -380,21 +388,51 @@ class StudentController { // Get all students
                         throw new Error("student_name_eng is required");
                     }
 
-                    const classId = row.class_id || row.classid;
                     const studentNameKh = (row.student_name_kh || row.name_kh || row.namekh);
                     const studentNameEng = (row.student_name_eng || row.name_eng || row.nameeng);
+                    let classCode = row.class_code || row.classcode;
 
-                    // Log to verify encoding (remove after testing)
+                    // Log to verify encoding
                     console.log('Processing student:', {
+                        classCode: classCode,
                         nameKh: studentNameKh,
-                        nameEng: studentNameEng,
-                        buffer: Buffer.from(studentNameKh, 'utf8')
+                        nameEng: studentNameEng
                     });
 
-                    // Check if class exists
-                    const classExists = await Class.findByPk(classId);
-                    if (! classExists) {
-                        throw new Error(`Class ID ${classId} not found`);
+                    let classRecord = null;
+                    let wasAssignedToDefault = false;
+
+                    // Check if class_code is empty or not provided
+                    if (! classCode || classCode === '') { // Use the first available class from database
+                        classRecord = defaultClass;
+                        classCode = defaultClass.class_code;
+                        wasAssignedToDefault = true;
+
+                        results.assignedToDefault.push({student_name_kh: studentNameKh, student_name_eng: studentNameEng, assigned_class_code: classCode, message: `Assigned to default class '${classCode}' (class_code was empty)`});
+
+                        console.log(`Assigned student ${studentNameKh} to default class ${classCode}`);
+                    } else { // Class code is provided, check if class exists by class_code
+                        classRecord = await Class.findOne({
+                            where: {
+                                class_code: classCode
+                            }
+                        });
+
+                        // If class doesn't exist, create it automatically
+                        if (! classRecord) {
+                            try {
+                                classRecord = await Class.create({class_code: classCode});
+
+                                results.classesCreated.push({class_code: classCode, class_id: classRecord.class_id, message: `Class '${classCode}' created automatically`});
+                                console.log(`Auto-created class: ${classCode} with ID: ${
+                                    classRecord.class_id
+                                }`);
+                            } catch (classCreateError) {
+                                throw new Error(`Failed to create class '${classCode}': ${
+                                    classCreateError.message
+                                }`);
+                            }
+                        }
                     }
 
                     // Validate gender if provided
@@ -403,21 +441,21 @@ class StudentController { // Get all students
                         throw new Error("Gender must be M, F, or O");
                     }
 
-                    // Check for duplicate student (by Khmer name and class)
+                    // Check for duplicate student (by Khmer name and class_id)
                     const existingStudent = await Student.findOne({
                         where: {
                             student_name_kh: studentNameKh,
-                            class_id: classId
+                            class_id: classRecord.class_id
                         }
                     });
 
                     if (existingStudent) { // Student already exists - skip
-                        results.duplicates.push({row: row, message: `Student '${studentNameKh}' already exists in class ${classId}`, existing_student_id: existingStudent.student_id});
+                        results.duplicates.push({row: row, message: `Student '${studentNameKh}' already exists in class ${classCode}`, existing_student_id: existingStudent.student_id, was_assigned_to_default: wasAssignedToDefault});
                         continue;
                     }
 
-                    // Create student
-                    const student = await Student.create({class_id: classId, student_name_kh: studentNameKh, student_name_eng: studentNameEng, gender: gender});
+                    // Create student with the class_id from the found/created class
+                    const student = await Student.create({class_id: classRecord.class_id, student_name_kh: studentNameKh, student_name_eng: studentNameEng, gender: gender});
 
                     // Fetch student with class details
                     const studentWithClass = await Student.findByPk(student.student_id, {
@@ -429,7 +467,13 @@ class StudentController { // Get all students
                         ]
                     });
 
-                    results.success.push({row: row, student_id: student.student_id, student: studentWithClass});
+                    results.success.push({
+                        row: row,
+                        student_id: student.student_id,
+                        student: studentWithClass,
+                        was_assigned_to_default: wasAssignedToDefault,
+                        assigned_class_code: wasAssignedToDefault ? classCode : null
+                    });
 
                 } catch (err) {
                     console.error("Row error:", err);
@@ -452,7 +496,13 @@ class StudentController { // Get all students
                     total: normalizedData.length,
                     success: results.success.length,
                     duplicates: results.duplicates.length,
-                    failed: results.failed.length
+                    failed: results.failed.length,
+                    classesCreated: results.classesCreated.length,
+                    assignedToDefault: results.assignedToDefault.length
+                },
+                defaultClassUsed: {
+                    class_code: defaultClass.class_code,
+                    class_id: defaultClass.class_id
                 },
                 results: results
             });
