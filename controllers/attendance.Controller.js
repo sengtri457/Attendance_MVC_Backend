@@ -67,7 +67,7 @@ class AttendanceController {
                             {
                                 model: Class,
                                 as: "class",
-                                attributes: ["class_id", "class_name"]
+                                attributes: ["class_id", "class_code"]
                             },
                         ]
                     }, {
@@ -1637,6 +1637,7 @@ class AttendanceController {
                      else if (status === "E") 
                         e++;
                     
+
                 });
 
                 // Stats columns
