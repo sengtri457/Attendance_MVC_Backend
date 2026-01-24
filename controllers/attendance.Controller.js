@@ -1553,7 +1553,7 @@ class AttendanceController {
                 ]
             });
 
-            // Get attendance records
+            // Get attendance records with Subjects
             const attendanceRecords = await Attendance.findAll({
                 where: {
                     attendance_date: {
@@ -1568,12 +1568,17 @@ class AttendanceController {
                             class_id
                         },
                         attributes: []
+                    }, {
+                        model: Subject,
+                        as: "subject",
+                        attributes: ["subject_id", "subject_name", "subject_code"]
                     }
                 ],
-                attributes: [
-                    "student_id", "attendance_date", "status"
-                ],
-                raw: true
+                // We need Subject data, so raw=true might flatten incorrectly if we want structured subject info
+                // Use plain=true on results or map/get.
+                // Or use nested property access with raw: true
+                raw: true,
+                nest: true
             });
 
             // Generate date range
@@ -1585,6 +1590,31 @@ class AttendanceController {
                 currentDate.setDate(currentDate.getDate() + 1);
             }
 
+            // Identify subjects for each date
+            const schedule = {};
+            dateRange.forEach(date => {
+                schedule[date] = [];
+            });
+
+            attendanceRecords.forEach(record => {
+                const date = record.attendance_date;
+                const subj = record.subject;
+                if (! schedule[date].find(s => s.subject_id === subj.subject_id)) {
+                    schedule[date].push({subject_id: subj.subject_id, subject_name: subj.subject_name, subject_code: subj.subject_code});
+                }
+            });
+
+            // If a date has no subjects in records, we might want to check if any are scheduled
+            // For now, based on records is consistent with the view logic if that view is record-based.
+            // But usually we want all potential subjects.
+            // The view logic calculates "subjectsInPeriod" and "getSubjectsForDate".
+            // Let's mimic that basic structure or use what we found.
+            // Sort subjects by ID for consistency
+            Object.keys(schedule).forEach(date => {
+                schedule[date].sort((a, b) => a.subject_id - b.subject_id);
+            });
+
+
             // Prepare Excel Data (Array of Arrays)
             const wsData = [];
 
@@ -1592,22 +1622,43 @@ class AttendanceController {
             wsData.push([`Weekly Attendance Report - ${className}`]);
             wsData.push([`Period: ${start_date} to ${end_date}`]);
             wsData.push([]);
-            // Empty row
 
-            // 2. Header Row
-            const headers = [
-                "No",
-                "Name (Khmer)",
-                "Name (English)",
-                "Gender",
-                ... dateRange,
-                "P",
-                "A",
-                "L",
-                "E",
-                "Rate (%)"
-            ];
-            wsData.push(headers);
+            // 2. Header Row (2 Levels)
+            // Top Header: Date Groups
+            const topHeader = ["No", "Name (Khmer)", "Name (English)", "Gender"];
+            const subHeader = ["", "", "", ""]; // Fillers for student info cols
+
+            dateRange.forEach(date => {
+                const dateSubjects = schedule[date];
+                const colSpan = dateSubjects.length > 0 ? dateSubjects.length : 1;
+
+                // Add Date to Top Header
+                topHeader.push(date);
+                // Add fillers for colspan
+                for (let i = 1; i < colSpan; i++) {
+                    topHeader.push("");
+                }
+
+                // Add Subjects to Sub Header
+                if (dateSubjects.length > 0) {
+                    dateSubjects.forEach(s => {
+                        subHeader.push(s.subject_name); // Or Code
+                    });
+                } else {
+                    subHeader.push("-");
+                }
+            });
+
+            // Add Stats Headers
+            topHeader.push("Statistics", "", "", "", "");
+            subHeader.push("P", "A", "L", "E", "Rate (%)");
+
+            // Merge Handling is complex in basic array of arrays for xlsx without 'merges' property
+            // We will construct the 'merges' array for the sheet manually
+
+            wsData.push(topHeader);
+            wsData.push(subHeader);
+
 
             // 3. Data Rows
             students.forEach((student, idx) => {
@@ -1623,34 +1674,156 @@ class AttendanceController {
                     l = 0,
                     e = 0;
 
-                dateRange.forEach((date) => {
-                    const record = attendanceRecords.find((r) => r.student_id === student.student_id && r.attendance_date === date);
-                    const status = record ? record.status : "";
-                    row.push(status);
+                dateRange.forEach(date => {
+                    const dateSubjects = schedule[date];
+                    if (dateSubjects.length > 0) {
+                        dateSubjects.forEach(subj => {
+                            const record = attendanceRecords.find(r => r.student_id === student.student_id && r.attendance_date === date && r.subject.subject_id === subj.subject_id);
+                            const status = record ? record.status : "";
+                            row.push(status);
 
-                    if (status === "P") 
-                        p++;
-                     else if (status === "A") 
-                        a++;
-                     else if (status === "L") 
-                        l++;
-                     else if (status === "E") 
-                        e++;
-                    
+                            if (status === "P") 
+                                p++;
+                             else if (status === "A") 
+                                a++;
+                             else if (status === "L") 
+                                l++;
+                             else if (status === "E") 
+                                e++;
+                            
 
+
+                        });
+                    } else {
+                        row.push(""); // Empty cell for no-subject dates
+                    }
                 });
 
-                // Stats columns
+                // Stats
                 const total = p + a + l + e;
                 const rate = total > 0 ? ((p / total) * 100).toFixed(1) : "0.0";
-
                 row.push(p, a, l, e, `${rate}%`);
+
                 wsData.push(row);
             });
 
-            // Create Workbook and Worksheet
+            // Create Workbook
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            // Calculate Merges
+            const merges = [
+                // Merge Title?
+                {
+                    s: {
+                        r: 0,
+                        c: 0
+                    },
+                    e: {
+                        r: 0,
+                        c: 8
+                    }
+                },
+                { // Title row span
+                    s: {
+                        r: 1,
+                        c: 0
+                    },
+                    e: {
+                        r: 1,
+                        c: 8
+                    }
+                },
+
+                // Merge Student Info Columns (Row 3-4 -> indices 3, 4 with data offset)
+                // Actually rowIndex of keys: topHeader is row index 3 (wsData[3]), subHeader is 4 (wsData[4])
+                // Indices in Excel are 0-based.
+                // Title at 0, Subtitle at 1, Empty at 2, TopHeader at 3, SubHeader at 4
+
+                {
+                    s: {
+                        r: 3,
+                        c: 0
+                    },
+                    e: {
+                        r: 4,
+                        c: 0
+                    }
+                },
+                { // No
+                    s: {
+                        r: 3,
+                        c: 1
+                    },
+                    e: {
+                        r: 4,
+                        c: 1
+                    }
+                }, { // Name KH
+                    s: {
+                        r: 3,
+                        c: 2
+                    },
+                    e: {
+                        r: 4,
+                        c: 2
+                    }
+                }, { // Name EN
+                    s: {
+                        r: 3,
+                        c: 3
+                    },
+                    e: {
+                        r: 4,
+                        c: 3
+                    }
+                }, // Gender
+            ];
+
+            // Merge Date Columns
+            let colIndex = 4;
+            dateRange.forEach(date => {
+                const dateSubjects = schedule[date];
+                const span = dateSubjects.length > 0 ? dateSubjects.length : 1;
+                if (span > 1) {
+                    merges.push({
+                        s: {
+                            r: 3,
+                            c: colIndex
+                        },
+                        e: {
+                            r: 3,
+                            c: colIndex + span - 1
+                        }
+                    });
+                }
+                colIndex += span;
+            });
+
+            // Merge Stats Header
+            // The stats start at current colIndex
+            merges.push({
+                s: {
+                    r: 3,
+                    c: colIndex
+                },
+                e: {
+                    r: 3,
+                    c: colIndex + 4
+                }
+            });
+
+
+            ws['!merges'] = merges;
+
+            // Auto-width (basic approximation)
+            /*
+            const wscols = [
+                {wch:5}, {wch:20}, {wch:20}, {wch:5} // Student info widths
+            ];
+            ws['!cols'] = wscols; 
+            */
+
 
             // Append Worksheet
             XLSX.utils.book_append_sheet(wb, ws, "Attendance");
