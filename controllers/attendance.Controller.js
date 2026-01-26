@@ -1045,7 +1045,6 @@ class AttendanceController {
             // Get unique subjects
             const subjects = subjectsInPeriod.map((s) => ({subject_id: s["subject.subject_id"], subject_name: s["subject.subject_name"]}));
 
-            // Get all attendance records for the date range
             // Get attendance records for the date range AND the students on this page
             const studentIds = students.map(s => s.student_id);
 
@@ -1092,8 +1091,8 @@ class AttendanceController {
             // Build attendance grid with multiple subjects per day
             const attendanceGrid = students.map((student, index) => {
                 const studentAttendance = {};
-
-                dateRange.forEach((date) => { // Get all attendance records for this student on this date
+                // Get all attendance records for this student on this date
+                dateRange.forEach((date) => {
                     const dayRecords = attendanceRecords.filter((r) => r.student_id === student.student_id && r.attendance_date === date,);
 
                     // Group by subject
@@ -1237,8 +1236,6 @@ class AttendanceController {
                 return res.status(400).json({success: false, message: "start_date, end_date, and class_id are required"});
             }
 
-            // For now, we'll get the schedule from the actual attendance records
-            // In a full implementation, you'd have a separate Schedule table
 
             const classInfo = await Class.findByPk(class_id);
             if (! classInfo) {
@@ -1574,8 +1571,6 @@ class AttendanceController {
                         attributes: ["subject_id", "subject_name", "subject_code"]
                     }
                 ],
-                // We need Subject data, so raw=true might flatten incorrectly if we want structured subject info
-                // Use plain=true on results or map/get.
                 // Or use nested property access with raw: true
                 raw: true,
                 nest: true
@@ -1603,12 +1598,6 @@ class AttendanceController {
                     schedule[date].push({subject_id: subj.subject_id, subject_name: subj.subject_name, subject_code: subj.subject_code});
                 }
             });
-
-            // If a date has no subjects in records, we might want to check if any are scheduled
-            // For now, based on records is consistent with the view logic if that view is record-based.
-            // But usually we want all potential subjects.
-            // The view logic calculates "subjectsInPeriod" and "getSubjectsForDate".
-            // Let's mimic that basic structure or use what we found.
             // Sort subjects by ID for consistency
             Object.keys(schedule).forEach(date => {
                 schedule[date].sort((a, b) => a.subject_id - b.subject_id);
@@ -1695,10 +1684,9 @@ class AttendanceController {
 
                         });
                     } else {
-                        row.push(""); // Empty cell for no-subject dates
+                        row.push("");
                     }
                 });
-
                 // Stats
                 const total = p + a + l + e;
                 const rate = total > 0 ? ((p / total) * 100).toFixed(1) : "0.0";
@@ -1706,11 +1694,9 @@ class AttendanceController {
 
                 wsData.push(row);
             });
-
             // Create Workbook
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(wsData);
-
             // Calculate Merges
             const merges = [
                 // Merge Title?
@@ -1734,12 +1720,6 @@ class AttendanceController {
                         c: 8
                     }
                 },
-
-                // Merge Student Info Columns (Row 3-4 -> indices 3, 4 with data offset)
-                // Actually rowIndex of keys: topHeader is row index 3 (wsData[3]), subHeader is 4 (wsData[4])
-                // Indices in Excel are 0-based.
-                // Title at 0, Subtitle at 1, Empty at 2, TopHeader at 3, SubHeader at 4
-
                 {
                     s: {
                         r: 3,
