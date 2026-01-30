@@ -11,6 +11,7 @@ const routes = require("./routes");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+
 // Security middleware
 app.use(helmet());
 
@@ -62,11 +63,19 @@ const studentroute = require("./routes/student.routes");
 const subjectroute = require("./routes/subject.route");
 const classroute = require("./routes/class.routes");
 const attendanceRoute = require("./routes/attendance.routes");
-app.use("/api/v1/teacher", teacherroute);
-app.use("/api/v1/student", studentroute);
-app.use("/api/v1/subject", subjectroute);
-app.use("/api/v1/class", classroute);
-app.use("/api/v1/attendance", attendanceRoute);
+const authRoute = require("./routes/auth.routes");
+
+const {verifyToken} = require("./middlewares/auth.middleware");
+
+// Public routes (if any, or leave auth public)
+
+// Protected routes
+app.use("/api/v1/teacher", verifyToken, teacherroute);
+app.use("/api/v1/student", verifyToken, studentroute);
+app.use("/api/v1/subject", verifyToken, subjectroute);
+app.use("/api/v1/class", verifyToken, classroute);
+app.use("/api/v1/attendance", verifyToken, attendanceRoute);
+app.use("/api/v1/auth", authRoute);
 
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));

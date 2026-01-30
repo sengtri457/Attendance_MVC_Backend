@@ -1,5 +1,5 @@
 const Subject = require("../models/Subject");
-const ClassSubject = require("../models/ClassSubject "); // You'll need this model
+const ClassSubject = require("../models/ClassSubject"); // You'll need this model
 const {Op} = require("sequelize");
 
 class SubjectController { /**
@@ -210,7 +210,7 @@ class SubjectController { /**
 
             const dayOfWeek = targetDate.getDay(); // 0-6
 
-            const subjects = await Subject.findAll({
+            let subjects = await Subject.findAll({
                 include: [
                     {
                         model: ClassSubject,
@@ -224,6 +224,10 @@ class SubjectController { /**
                 ],
                 attributes: ["subject_id", "subject_name", "subject_code"]
             });
+
+            // Fallback: If no scheduled subjects, check if the Class has a main subject
+            // Removed because Class model does not have a direct subject association
+            // if (subjects.length === 0) { ... }
 
             return res.status(200).json({
                 success: true,
@@ -318,6 +322,90 @@ class SubjectController { /**
         } catch (error) {
             console.error("Error deleting subject:", error);
             return res.status(500).json({success: false, message: "Failed to delete subject", error: error.message});
+        }
+    }
+
+    /**
+     * Assign a subject to a class for a specific day and time
+     * POST /subject/assign
+     */
+    async assignSubjectToClass(req, res) {
+        try {
+            const {
+                class_id,
+                subject_id,
+                day_of_week,
+                start_time,
+                end_time,
+                room_number,
+                teacher_id
+            } = req.body;
+
+            // Basic validation
+            if (!class_id || !subject_id || day_of_week === undefined) {
+                return res.status(400).json({success: false, message: "Class, Subject, and Day of Week are required"});
+            }
+
+            // Check if assignment already exists
+            const existingAssignment = await ClassSubject.findOne({
+                where: {
+                    class_id,
+                    subject_id,
+                    day_of_week
+                }
+            });
+
+            if (existingAssignment) { // Update if exists
+                await existingAssignment.update({
+                    start_time,
+                    end_time,
+                    room_number,
+                    teacher_id: teacher_id || existingAssignment.teacher_id
+                });
+                return res.status(200).json({success: true, message: "Schedule updated successfully", data: existingAssignment});
+            }
+
+            const newAssignment = await ClassSubject.create({
+                class_id,
+                subject_id,
+                day_of_week,
+                start_time,
+                end_time,
+                room_number,
+                teacher_id
+            });
+
+            return res.status(201).json({success: true, message: "Subject assigned successfully", data: newAssignment});
+        } catch (error) {
+            console.error("Error assigning subject:", error);
+            return res.status(500).json({success: false, message: "Failed to assign subject", error: error.message});
+        }
+    }
+
+    /**
+     * Remove a subject from a class schedule
+     * DELETE /subject/assign/:classId/:subjectId/:dayOfWeek
+     */
+    async removeSubjectFromClass(req, res) {
+        try {
+            const {classId, subjectId, dayOfWeek} = req.params;
+
+            const deleted = await ClassSubject.destroy({
+                where: {
+                    class_id: classId,
+                    subject_id: subjectId,
+                    day_of_week: dayOfWeek
+                }
+            });
+
+            if (deleted) {
+                return res.status(200).json({success: true, message: "Subject removed from schedule"});
+            } else {
+                return res.status(404).json({success: false, message: "Schedule entry not found"});
+            }
+        } catch (error) {
+            console.error("Error removing subject assignment:", error);
+            return res.status(500).json({success: false, message: "Failed to remove subject assignment", error: error.message});
         }
     }
 }
