@@ -2,271 +2,174 @@ const Student = require("../models/Student");
 const Teacher = require("../models/Teacher");
 const Class = require("../models/Class");
 const Subject = require("../models/Subject");
-const { validationResult } = require("express-validator");
 const { Op } = require("sequelize");
+const {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendValidationError,
+  asyncHandler,
+  checkValidation
+} = require("../middlewares/response.middleware");
 
 class SubjectController {
-  async getAllSubjects(req, res) {
-    try {
-      const { page = 1, limit = 10, search } = req.query;
-      const offset = (page - 1) * limit;
+  getAllSubjects = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, search } = req.query;
+    const offset = (page - 1) * limit;
 
-      const whereClause = search
-        ? {
-            [Op.or]: [
-              { subject_name: { [Op.like]: `%${search}%` } },
-              { subject_code: { [Op.like]: `%${search}%` } },
-            ],
-          }
-        : {};
+    const whereClause = search
+      ? {
+          [Op.or]: [
+            { subject_name: { [Op.like]: `%${search}%` } },
+            { subject_code: { [Op.like]: `%${search}%` } },
+          ],
+        }
+      : {};
 
-      const { count, rows } = await Subject.findAndCountAll({
-        where: whereClause,
+    const { count, rows } = await Subject.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [["created_at", "DESC"]],
+    });
+
+    return sendSuccess(res, rows, "Subjects fetched successfully", 200, {
+      pagination: {
+        total: count,
+        page: parseInt(page),
         limit: parseInt(limit),
-        offset: parseInt(offset),
-        order: [["created_at", "DESC"]],
-      });
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  });
 
-      res.status(200).json({
-        success: true,
-        data: rows,
-        pagination: {
-          total: count,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(count / limit),
+  getSubjectById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const subject = await Subject.findByPk(id, {
+      include: [
+        {
+          model: Class,
+          as: "classes",
+          include: [
+            {
+              model: Teacher,
+              as: "teacher",
+            },
+          ],
         },
-      });
-    } catch (error) {
-      console.error("Get all subjects error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching subjects",
-        error: error.message,
-      });
+      ],
+    });
+
+    if (!subject) {
+      return sendNotFound(res, "Subject");
     }
-  }
 
-  async getSubjectById(req, res) {
-    try {
-      const { id } = req.params;
+    return sendSuccess(res, subject, "Subject fetched successfully");
+  });
 
-      const subject = await Subject.findByPk(id, {
-        include: [
-          {
-            model: Class,
-            as: "classes",
-            include: [
-              {
-                model: Teacher,
-                as: "teacher",
-              },
-            ],
-          },
-        ],
-      });
-
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: "Subject not found",
-        });
-      }
-
-      res.status(200).json({
-        success: true,
-        data: subject,
-      });
-    } catch (error) {
-      console.error("Get subject by ID error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching subject",
-        error: error.message,
-      });
+  createSubject = asyncHandler(async (req, res) => {
+    if (!checkValidation(req, res)) {
+      return;
     }
-  }
 
-  async createSubject(req, res) {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
+    const subject = await Subject.create(req.body);
 
-      const subject = await Subject.create(req.body);
+    return sendSuccess(res, subject, "Subject created successfully", 201);
+  });
 
-      res.status(201).json({
-        success: true,
-        message: "Subject created successfully",
-        data: subject,
-      });
-    } catch (error) {
-      console.error("Create subject error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error creating subject",
-        error: error.message,
-      });
+  updateSubject = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!checkValidation(req, res)) {
+      return;
     }
-  }
 
-  async updateSubject(req, res) {
-    try {
-      const { id } = req.params;
-      const errors = validationResult(req);
+    const subject = await Subject.findByPk(id);
 
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
-
-      const subject = await Subject.findByPk(id);
-
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: "Subject not found",
-        });
-      }
-
-      await subject.update(req.body);
-
-      res.status(200).json({
-        success: true,
-        message: "Subject updated successfully",
-        data: subject,
-      });
-    } catch (error) {
-      console.error("Update subject error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error updating subject",
-        error: error.message,
-      });
+    if (!subject) {
+      return sendNotFound(res, "Subject");
     }
-  }
 
-  async deleteSubject(req, res) {
-    try {
-      const { id } = req.params;
+    await subject.update(req.body);
 
-      const subject = await Subject.findByPk(id);
+    return sendSuccess(res, subject, "Subject updated successfully");
+  });
 
-      if (!subject) {
-        return res.status(404).json({
-          success: false,
-          message: "Subject not found",
-        });
-      }
+  deleteSubject = asyncHandler(async (req, res) => {
+    const { id } = req.params;
 
-      await subject.destroy();
+    const subject = await Subject.findByPk(id);
 
-      res.status(200).json({
-        success: true,
-        message: "Subject deleted successfully",
-      });
-    } catch (error) {
-      console.error("Delete subject error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error deleting subject",
-        error: error.message,
-      });
+    if (!subject) {
+      return sendNotFound(res, "Subject");
     }
-  }
+
+    await subject.destroy();
+
+    return sendSuccess(res, null, "Subject deleted successfully");
+  });
 }
 
 class ClassController {
-  async getAllClasses(req, res) {
-    try {
-      const { page = 1, limit = 10, teacher_id, class_year } = req.query;
-      const offset = (page - 1) * limit;
+  getAllClasses = asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, teacher_id, class_year } = req.query;
+    const offset = (page - 1) * limit;
 
-      const whereClause = {};
-      if (class_year) whereClause.class_year = class_year;
+    const whereClause = {};
+    if (class_year) whereClause.class_year = class_year;
 
-      const { count, rows } = await Class.findAndCountAll({
-        where: whereClause,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        include: [
-          {
-            model: Student,
-            as: "students",
-            attributes: ["student_id", "student_name_kh", "student_name_eng"],
-          },
-        ],
-
-        order: [["created_at", "DESC"]],
-      });
-
-      res.status(200).json({
-        success: true,
-        data: rows,
-        pagination: {
-          total: count,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(count / limit),
+    const { count, rows } = await Class.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      include: [
+        {
+          model: Student,
+          as: "students",
+          attributes: ["student_id", "student_name_kh", "student_name_eng"],
         },
-      });
-    } catch (error) {
-      console.error("Get all classes error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching classes",
-        error: error.message,
-      });
+      ],
+
+      order: [["created_at", "DESC"]],
+    });
+
+    return sendSuccess(res, rows, "Classes fetched successfully", 200, {
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  });
+
+  getClassById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const classData = await Class.findByPk(id, {
+      include: [
+        {
+          model: Subject,
+          as: "subject",
+        },
+        {
+          model: Teacher,
+          as: "teacher",
+        },
+        {
+          model: Student,
+          as: "student",
+        },
+      ],
+    });
+
+    if (!classData) {
+      return sendNotFound(res, "Class");
     }
-  }
 
-  async getClassById(req, res) {
-    try {
-      const { id } = req.params;
-
-      const classData = await Class.findByPk(id, {
-        include: [
-          {
-            model: Subject,
-            as: "subject",
-          },
-          {
-            model: Teacher,
-            as: "teacher",
-          },
-          {
-            model: Student,
-            as: "student",
-          },
-        ],
-      });
-
-      if (!classData) {
-        return res.status(404).json({
-          success: false,
-          message: "Class not found",
-        });
-      }
-
-      res.status(200).json({
-        success: true,
-        data: classData,
-      });
-    } catch (error) {
-      console.error("Get class by ID error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error fetching class",
-        error: error.message,
-      });
-    }
-  }
+    return sendSuccess(res, classData, "Class fetched successfully");
+  });
 
   async createClass(req, res) {
     try {
@@ -320,101 +223,60 @@ class ClassController {
     }
   }
 
-  async updateClass(req, res) {
-    try {
-      const { id } = req.params;
-      const errors = validationResult(req);
+  updateClass = asyncHandler(async (req, res) => {
+    const { id } = req.params;
 
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
-
-      const classData = await Class.findByPk(id);
-
-      if (!classData) {
-        return res.status(404).json({
-          success: false,
-          message: "Class not found",
-        });
-      }
-
-      // Verify subject if being updated
-      if (req.body.subject_id) {
-        const subject = await Subject.findByPk(req.body.subject_id);
-        if (!subject) {
-          return res.status(404).json({
-            success: false,
-            message: "Subject not found",
-          });
-        }
-      }
-
-      // Verify teacher if being updated
-      if (req.body.teacher_id) {
-        const teacher = await Teacher.findByPk(req.body.teacher_id);
-        if (!teacher) {
-          return res.status(404).json({
-            success: false,
-            message: "Teacher not found",
-          });
-        }
-      }
-
-      await classData.update(req.body);
-
-      const updatedClass = await Class.findByPk(id, {
-        include: [
-          { model: Subject, as: "subject" },
-          { model: Teacher, as: "teacher" },
-        ],
-      });
-
-      res.status(200).json({
-        success: true,
-        message: "Class updated successfully",
-        data: updatedClass,
-      });
-    } catch (error) {
-      console.error("Update class error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error updating class",
-        error: error.message,
-      });
+    if (!checkValidation(req, res)) {
+      return;
     }
-  }
 
-  async deleteClass(req, res) {
-    try {
-      const { id } = req.params;
+    const classData = await Class.findByPk(id);
 
-      const classData = await Class.findByPk(id);
-
-      if (!classData) {
-        return res.status(404).json({
-          success: false,
-          message: "Class not found",
-        });
-      }
-
-      await classData.destroy();
-
-      res.status(200).json({
-        success: true,
-        message: "Class deleted successfully",
-      });
-    } catch (error) {
-      console.error("Delete class error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error deleting class",
-        error: error.message,
-      });
+    if (!classData) {
+      return sendNotFound(res, "Class");
     }
-  }
+
+    // Verify subject if being updated
+    if (req.body.subject_id) {
+      const subject = await Subject.findByPk(req.body.subject_id);
+      if (!subject) {
+        return sendNotFound(res, "Subject");
+      }
+    }
+
+    // Verify teacher if being updated
+    if (req.body.teacher_id) {
+      const teacher = await Teacher.findByPk(req.body.teacher_id);
+      if (!teacher) {
+        return sendNotFound(res, "Teacher");
+      }
+    }
+
+    await classData.update(req.body);
+
+    const updatedClass = await Class.findByPk(id, {
+      include: [
+        { model: Subject, as: "subject" },
+        { model: Teacher, as: "teacher" },
+      ],
+    });
+
+    return sendSuccess(res, updatedClass, "Class updated successfully");
+  });
+
+  deleteClass = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const classData = await Class.findByPk(id);
+
+    if (!classData) {
+      return sendNotFound(res, "Class");
+    }
+
+    await classData.destroy();
+
+    return sendSuccess(res, null, "Class deleted successfully");
+  });
 }
 
 module.exports = {

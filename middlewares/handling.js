@@ -1,64 +1,39 @@
-// Error handling middleware
+/**
+ * Error handling middleware
+ * Uses response middleware for consistent error responses
+ */
+const { handleSequelizeError, sendError, sendNotFound } = require('./response.middleware');
+
 const errorHandler = (err, req, res, next) => {
-  console.error("Error:", err);
+  console.error('Error:', err);
 
-  // Sequelize validation error
-  if (err.name === "SequelizeValidationError") {
-    return res.status(400).json({
-      success: false,
-      message: "Validation error",
-      errors: err.errors.map((e) => ({
-        field: e.path,
-        message: e.message,
-      })),
-    });
+  // Handle Sequelize errors using the response middleware
+  if (
+    err.name === 'SequelizeValidationError' ||
+    err.name === 'SequelizeUniqueConstraintError' ||
+    err.name === 'SequelizeForeignKeyConstraintError' ||
+    err.name === 'SequelizeDatabaseError'
+  ) {
+    return handleSequelizeError(res, err);
   }
 
-  // Sequelize unique constraint error
-  if (err.name === "SequelizeUniqueConstraintError") {
-    return res.status(409).json({
-      success: false,
-      message: "Duplicate entry",
-      errors: err.errors.map((e) => ({
-        field: e.path,
-        message: e.message,
-      })),
-    });
+  // Handle HTTP errors with status codes
+  if (err.status) {
+    return sendError(res, err.message || 'An error occurred', err.status, err);
   }
 
-  // Sequelize foreign key constraint error
-  if (err.name === "SequelizeForeignKeyConstraintError") {
-    return res.status(400).json({
-      success: false,
-      message: "Foreign key constraint error",
-      error: "Referenced record does not exist",
-    });
-  }
-
-  // Sequelize database error
-  if (err.name === "SequelizeDatabaseError") {
-    return res.status(500).json({
-      success: false,
-      message: "Database error",
-      error: err.message,
-    });
-  }
-
-  // Default error
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || "Internal server error",
-    error: process.env.NODE_ENV === "development" ? err.stack : undefined,
-  });
+  // Default error handler
+  return sendError(
+    res,
+    err.message || 'Internal server error',
+    500,
+    process.env.NODE_ENV === 'development' ? err : null
+  );
 };
 
 // 404 handler
 const notFoundHandler = (req, res, next) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
-    path: req.originalUrl,
-  });
+  return sendNotFound(res, 'Route');
 };
 
 module.exports = {

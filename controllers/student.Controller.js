@@ -3,13 +3,21 @@ const Teacher = require("../models/Teacher");
 const Class = require("../models/Class");
 const Subject = require("../models/Subject");
 const Attendance = require("../models/Attendance");
-const {validationResult} = require("express-validator");
 const sequelize = require("../config/database");
 const {Op} = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
 const path = require("path");
 const {parse} = require('csv-parse/sync');
+const {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendValidationError,
+  handleSequelizeError,
+  asyncHandler,
+  checkValidation
+} = require("../middlewares/response.middleware");
 
 // function excelDateToJSDate(excelDate) {
 //     if (! excelDate)
@@ -29,72 +37,67 @@ const {parse} = require('csv-parse/sync');
 
 //     return null;
 // }
-class StudentController { // Get all students
-    async getAllStudents(req, res) {
-        try {
-            const {
-                page = 1,
-                limit = 10,
-                search,
-                class_id,
-                gender
-            } = req.query;
-            const offset = (page - 1) * limit;
+class StudentController {
+    // Get all students
+    getAllStudents = asyncHandler(async (req, res) => {
+        const {
+            page = 1,
+            limit = 10,
+            search,
+            class_id,
+            gender
+        } = req.query;
+        const offset = (page - 1) * limit;
 
-            const whereClause = {};
+        const whereClause = {};
 
-            if (search) {
-                whereClause[Op.or] = [
-                    {
-                        student_name_kh: {
-                            [Op.like]: `%${search}%`
-                        }
-                    }, {
-                        student_name_eng: {
-                            [Op.like]: `%${search}%`
-                        }
-                    },
-                ];
-            }
-
-            if (class_id) {
-                whereClause.class_id = class_id;
-            }
-
-            if (gender) {
-                whereClause.gender = gender;
-            }
-
-            const {count, rows} = await Student.findAndCountAll({
-                where: whereClause,
-                limit: parseInt(limit),
-                offset: parseInt(offset),
-                include: [
-                    {
-                        model: Class,
-                        as: "class"
-                    },
-                ],
-                order: [
-                    ["created_at", "DESC"]
-                ]
-            });
-
-            res.status(200).json({
-                success: true,
-                data: rows,
-                pagination: {
-                    total: count,
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    totalPages: Math.ceil(count / limit)
+        if (search) {
+            whereClause[Op.or] = [
+                {
+                    student_name_kh: {
+                        [Op.like]: `%${search}%`
+                    }
+                },
+                {
+                    student_name_eng: {
+                        [Op.like]: `%${search}%`
+                    }
                 }
-            });
-        } catch (error) {
-            console.error("Get all students error:", error);
-            res.status(500).json({success: false, message: "Error fetching students", error: error.message});
+            ];
         }
-    }
+
+        if (class_id) {
+            whereClause.class_id = class_id;
+        }
+
+        if (gender) {
+            whereClause.gender = gender;
+        }
+
+        const {count, rows} = await Student.findAndCountAll({
+            where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            include: [
+                {
+                    model: Class,
+                    as: "class"
+                },
+            ],
+            order: [
+                ["created_at", "DESC"]
+            ]
+        });
+
+        return sendSuccess(res, rows, "Students fetched successfully", 200, {
+            pagination: {
+                total: count,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                totalPages: Math.ceil(count / limit)
+            }
+        });
+    });
     // Get student by ID (simple - no nested includes)
     async getStudentById(req, res) {
         try {
@@ -122,188 +125,136 @@ class StudentController { // Get all students
     }
 
     // Get student detail with attendance summary
-    async getStudentDetail(req, res) {
-        try {
-            const {id} = req.params;
-            const {start_date, end_date} = req.query;
+    getStudentDetail = asyncHandler(async (req, res) => {
+        const {id} = req.params;
+        const {start_date, end_date} = req.query;
 
-            // Get student with class info
-            const student = await Student.findByPk(id, {
-                include: [
-                    {
-                        model: Class,
-                        as: "class",
-                        attributes: ["class_id", "class_code"]
-                    },
-                ]
-            });
-
-            if (! student) {
-                return res.status(404).json({success: false, message: "Student not found"});
-            }
-
-            // Calculate date range (default: last 30 days)
-            const endDate = end_date || new Date().toISOString().split("T")[0];
-            const startDate = start_date || (() => {
-                const date = new Date();
-                date.setDate(date.getDate() - 30);
-                return date.toISOString().split("T")[0];
-            })();
-
-            // Get attendance summary
-            const attendanceStats = await Attendance.findAll({
-                where: {
-                    student_id: id,
-                    attendance_date: {
-                        [Op.between]: [startDate, endDate]
-                    }
+        // Get student with class info
+        const student = await Student.findByPk(id, {
+            include: [
+                {
+                    model: Class,
+                    as: "class",
+                    attributes: ["class_id", "class_code"]
                 },
-                attributes: [
-                    "status",
-                    [
-                        sequelize.fn("COUNT", sequelize.col("status")),
-                        "count"
-                    ],
-                ],
-                group: ["status"],
-                raw: true
-            });
+            ]
+        });
 
-            const statusCounts = {
-                P: 0,
-                A: 0,
-                L: 0,
-                E: 0
-            };
-
-            attendanceStats.forEach((stat) => {
-                statusCounts[stat.status] = parseInt(stat.count);
-            });
-
-            const totalDays = Object.values(statusCounts).reduce((a, b) => a + b, 0);
-            const attendanceRate = totalDays > 0 ? ((statusCounts.P / totalDays) * 100).toFixed(1) + "%" : "0%";
-
-            // Get recent attendance records
-            const recentAttendance = await Attendance.findAll({
-                where: {
-                    student_id: id,
-                    attendance_date: {
-                        [Op.between]: [startDate, endDate]
-                    }
-                },
-                include: [
-                    {
-                        model: Subject,
-                        as: "subject",
-                        attributes: ["subject_id", "subject_name"]
-                    },
-                ],
-                order: [
-                    ["attendance_date", "DESC"]
-                ],
-                limit: 10
-            });
-
-            // Build response
-            const studentDetail = {
-                ... student.toJSON(),
-                attendance_summary: {
-                    total_days: totalDays,
-                    present: statusCounts.P,
-                    absent: statusCounts.A,
-                    late: statusCounts.L,
-                    excused: statusCounts.E,
-                    attendance_rate: attendanceRate
-                },
-                recent_attendance: recentAttendance
-            };
-
-            res.status(200).json({success: true, data: studentDetail});
-        } catch (error) {
-            console.error("Get student detail error:", error);
-            res.status(500).json({success: false, message: "Error fetching student details", error: error.message});
+        if (!student) {
+            return sendNotFound(res, "Student");
         }
-    }
+
+        // Calculate date range (default: last 30 days)
+        const endDate = end_date || new Date().toISOString().split("T")[0];
+        const startDate = start_date || (() => {
+            const date = new Date();
+            date.setDate(date.getDate() - 30);
+            return date.toISOString().split("T")[0];
+        })();
+
+        // Get attendance summary
+        const attendanceStats = await Attendance.findAll({
+            where: {
+                student_id: id,
+                attendance_date: {
+                    [Op.between]: [startDate, endDate]
+                }
+            },
+            attributes: [
+                "status",
+                [
+                    sequelize.fn("COUNT", sequelize.col("status")),
+                    "count"
+                ],
+            ],
+            group: ["status"],
+            raw: true
+        });
+
+        const statusCounts = {
+            P: 0,
+            A: 0,
+            L: 0,
+            E: 0
+        };
+
+        attendanceStats.forEach((stat) => {
+            statusCounts[stat.status] = parseInt(stat.count);
+        });
+
+        const totalDays = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+        const attendanceRate = totalDays > 0 ? ((statusCounts.P / totalDays) * 100).toFixed(1) + "%" : "0%";
+
+        // Get recent attendance records
+        const recentAttendance = await Attendance.findAll({
+            where: {
+                student_id: id,
+                attendance_date: {
+                    [Op.between]: [startDate, endDate]
+                }
+            },
+            include: [
+                {
+                    model: Subject,
+                    as: "subject",
+                    attributes: ["subject_id", "subject_name"]
+                },
+            ],
+            order: [
+                ["attendance_date", "DESC"]
+            ],
+            limit: 10
+        });
+
+        // Build response
+        const studentDetail = {
+            ...student.toJSON(),
+            attendance_summary: {
+                total_days: totalDays,
+                present: statusCounts.P,
+                absent: statusCounts.A,
+                late: statusCounts.L,
+                excused: statusCounts.E,
+                attendance_rate: attendanceRate
+            },
+            recent_attendance: recentAttendance
+        };
+
+        return sendSuccess(res, studentDetail, "Student details fetched successfully");
+    });
     // Create student
-    async createStudent(req, res) {
-        try { // Check express-validator errors
-            const errors = validationResult(req);
-            if (! errors.isEmpty()) {
-                return res.status(400).json({success: false, message: "Validation failed", errors: errors.array()});
-            }
-
-            // Check if class exists
-            const classExists = await Class.findByPk(req.body.class_id);
-            if (! classExists) {
-                return res.status(404).json({success: false, message: "Class not found"});
-            }
-
-            // Create student
-            const student = await Student.create(req.body);
-
-            // Fetch student with class details
-            const studentWithClass = await Student.findByPk(student.student_id, {
-                include: [
-                    {
-                        model: Class,
-                        as: "class"
-                    },
-                ]
-            });
-
-            res.status(201).json({success: true, message: "Student created successfully", data: studentWithClass});
-        } catch (error) {
-            console.error("Create student error:", error);
-
-            // Handle Sequelize validation errors
-            if (error.name === "SequelizeValidationError") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Validation error",
-                    errors: error.errors.map((e) => ({field: e.path, message: e.message, value: e.value, type: e.type}))
-                });
-            }
-
-            // Handle Sequelize unique constraint errors
-            if (error.name === "SequelizeUniqueConstraintError") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Duplicate entry",
-                    errors: error.errors.map((e) => ({field: e.path, message: e.message, value: e.value}))
-                });
-            }
-
-            // Handle Sequelize database errors
-            if (error.name === "SequelizeDatabaseError") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Database error",
-                    error: error.message,
-                    details: error.parent ? error.parent.sqlMessage : undefined
-                });
-            }
-
-            // Handle foreign key constraint errors
-            if (error.name === "SequelizeForeignKeyConstraintError") {
-                return res.status(400).json({success: false, message: "Foreign key constraint error", error: "Referenced record does not exist", field: error.fields});
-            }
-
-            // Generic error handler
-            res.status(500).json({
-                success: false, message: "Error creating student", error: error.message,
-                // Only in development
-                debug: process.env.NODE_ENV === "development" ? {
-                    name: error.name,
-                    stack: error.stack
-                } : undefined
-            });
+    createStudent = asyncHandler(async (req, res) => {
+        // Check express-validator errors
+        if (!checkValidation(req, res)) {
+            return;
         }
-    }
-    async uploadExcelAndInsert(req, res) {
-        try { // Check if file exists
-            if (!req.file) {
-                return res.status(400).json({success: false, message: "No file uploaded"});
-            }
+
+        // Check if class exists
+        const classExists = await Class.findByPk(req.body.class_id);
+        if (!classExists) {
+            return sendNotFound(res, "Class");
+        }
+
+        // Create student
+        const student = await Student.create(req.body);
+
+        // Fetch student with class details
+        const studentWithClass = await Student.findByPk(student.student_id, {
+            include: [
+                {
+                    model: Class,
+                    as: "class"
+                },
+            ]
+        });
+
+        return sendSuccess(res, studentWithClass, "Student created successfully", 201);
+    });
+    uploadExcelAndInsert = asyncHandler(async (req, res) => {
+        // Check if file exists
+        if (!req.file) {
+            return sendError(res, "No file uploaded", 400);
+        }
 
             const filePath = req.file.path;
             const fileExtension = path.extname(req.file.originalname).toLowerCase();
@@ -343,7 +294,7 @@ class StudentController { // Get all students
             // Validate data
             if (data.length === 0) {
                 fs.unlinkSync(filePath);
-                return res.status(400).json({success: false, message: "File is empty"});
+                return sendError(res, "File is empty", 400);
             }
             // Normalize column names (trim and lowercase)
             const normalizedData = data.map((row) => {
@@ -365,9 +316,9 @@ class StudentController { // Get all students
                 defaultClass = await Class.create({class_code: 'UNASSIGNED', class_name: 'Unassigned Students'});
             }
 
-            if (! defaultClass) {
+            if (!defaultClass) {
                 fs.unlinkSync(filePath);
-                return res.status(400).json({success: false, message: "No classes found in database. Please create at least one class first."});
+                return sendError(res, "No classes found in database. Please create at least one class first.", 400);
             }
 
             // Insert data into database
@@ -489,9 +440,7 @@ class StudentController { // Get all students
             // Delete the uploaded file after processing
             fs.unlinkSync(filePath);
 
-            res.status(200).json({
-                success: true,
-                message: "File data processed",
+            return sendSuccess(res, {
                 summary: {
                     total: normalizedData.length,
                     success: results.success.length,
@@ -505,32 +454,15 @@ class StudentController { // Get all students
                     class_id: defaultClass.class_id
                 },
                 results: results
-            });
-
-        } catch (err) { // Clean up file if error occurs
-            if (req.file && fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path);
-            }
-
-            console.error("Upload file error:", err);
-
-            res.status(500).json({
-                success: false,
-                message: "Server error",
-                error: err.message,
-                validationErrors: err.errors ? err.errors.map((e) => ({field: e.path, message: e.message, value: e.value, type: e.type})) : undefined,
-                debug: process.env.NODE_ENV === "development" ? err.stack : undefined
-            });
-        }
-    }
+            }, "File data processed successfully");
+    });
 
 
     // Bulk Insert (Better Performance for Large Files)
-    async uploadExcelBulkInsert(req, res) {
-        try {
-            if (!req.file) {
-                return res.status(400).json({success: false, message: "No file uploaded"});
-            }
+    uploadExcelBulkInsert = asyncHandler(async (req, res) => {
+        if (!req.file) {
+            return sendError(res, "No file uploaded", 400);
+        }
 
             const filePath = req.file.path;
             const workbook = xlsx.readFile(filePath);
@@ -540,7 +472,7 @@ class StudentController { // Get all students
 
             if (data.length === 0) {
                 fs.unlinkSync(filePath);
-                return res.status(400).json({success: false, message: "Excel file is empty"});
+                return sendError(res, "Excel file is empty", 400);
             }
 
             // Normalize column names
@@ -568,7 +500,7 @@ class StudentController { // Get all students
 
             if (invalidClassIds.length > 0) {
                 fs.unlinkSync(filePath);
-                return res.status(400).json({success: false, message: "Invalid class IDs found", invalid_class_ids: invalidClassIds});
+                return sendError(res, "Invalid class IDs found", 400, { invalid_class_ids: invalidClassIds });
             }
 
             // Map data to match model structure
@@ -614,86 +546,60 @@ class StudentController { // Get all students
             // Delete uploaded file
             fs.unlinkSync(filePath);
 
-            res.status(200).json({success: true, message: "Students inserted successfully", count: result.length, data: studentsWithClass});
-        } catch (err) {
-            if (req.file && fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path);
-            }
-
-            console.error("Bulk upload error:", err);
-
-            // Enhanced error response
-            res.status(500).json({
-                success: false,
-                message: "Server error",
-                error: err.message,
-                validationErrors: err.errors ? err.errors.map((e) => ({field: e.path, message: e.message, value: e.value, type: e.type})) : undefined,
-                failedRow: err.instance ? err.instance.dataValues : undefined,
-                debug: process.env.NODE_ENV === "development" ? err.stack : undefined
+            return sendSuccess(res, studentsWithClass, "Students inserted successfully", 200, {
+                count: result.length
             });
-        }
-    }
+    });
     // Update student
-    async updateStudent(req, res) {
-        try {
-            const {id} = req.params;
-            const errors = validationResult(req);
+    updateStudent = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            if (! errors.isEmpty()) {
-                return res.status(400).json({success: false, errors: errors.array()});
-            }
-
-            const student = await Student.findByPk(id);
-
-            if (! student) {
-                return res.status(404).json({success: false, message: "Student not found"});
-            }
-
-            // Check if class exists if class_id is being updated
-            if (req.body.class_id) {
-                const classExists = await Class.findByPk(req.body.class_id);
-                if (! classExists) {
-                    return res.status(404).json({success: false, message: "Class not found"});
-                }
-            }
-
-            await student.update(req.body);
-
-            const updatedStudent = await Student.findByPk(id, {
-                include: [
-                    {
-                        model: Class,
-                        as: "class"
-                    },
-                ]
-            });
-
-            res.status(200).json({success: true, message: "Student updated successfully", data: updatedStudent});
-        } catch (error) {
-            console.error("Update student error:", error);
-            res.status(500).json({success: false, message: "Error updating student", error: error.message});
+        if (!checkValidation(req, res)) {
+            return;
         }
-    }
+
+        const student = await Student.findByPk(id);
+
+        if (!student) {
+            return sendNotFound(res, "Student");
+        }
+
+        // Check if class exists if class_id is being updated
+        if (req.body.class_id) {
+            const classExists = await Class.findByPk(req.body.class_id);
+            if (!classExists) {
+                return sendNotFound(res, "Class");
+            }
+        }
+
+        await student.update(req.body);
+
+        const updatedStudent = await Student.findByPk(id, {
+            include: [
+                {
+                    model: Class,
+                    as: "class"
+                },
+            ]
+        });
+
+        return sendSuccess(res, updatedStudent, "Student updated successfully");
+    });
 
     // Delete student
-    async deleteStudent(req, res) {
-        try {
-            const {id} = req.params;
+    deleteStudent = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            const student = await Student.findByPk(id);
+        const student = await Student.findByPk(id);
 
-            if (! student) {
-                return res.status(404).json({success: false, message: "Student not found"});
-            }
-
-            await student.destroy();
-
-            res.status(200).json({success: true, message: "Student deleted successfully"});
-        } catch (error) {
-            console.error("Delete student error:", error);
-            res.status(500).json({success: false, message: "Error deleting student", error: error.message});
+        if (!student) {
+            return sendNotFound(res, "Student");
         }
-    }
+
+        await student.destroy();
+
+        return sendSuccess(res, null, "Student deleted successfully");
+    });
 }
 
 module.exports = new StudentController();

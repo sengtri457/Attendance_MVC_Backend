@@ -1,106 +1,98 @@
 const Subject = require("../models/Subject");
-const ClassSubject = require("../models/ClassSubject"); // You'll need this model
+const ClassSubject = require("../models/ClassSubject");
 const {Op} = require("sequelize");
+const {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendConflict,
+  asyncHandler,
+  checkValidation
+} = require("../middlewares/response.middleware");
 
-class SubjectController { /**
-   * Get all subjects
-   * GET /subject
-   */
-    async getAllSubjects(req, res) {
-        try {
-            const {
-                page = 1,
-                limit = 10,
-                search
-            } = req.query;
-            const offset = (page - 1) * limit;
+class SubjectController {
+    /**
+     * Get all subjects
+     * GET /subject
+     */
+    getAllSubjects = asyncHandler(async (req, res) => {
+        const {page = 1, limit = 10, search} = req.query;
+        const offset = (page - 1) * limit;
 
-            const whereClause = search ? {
-                [Op.or]: [
-                    {
-                        subject_name: {
-                            [Op.like]: `%${search}%`
-                        }
-                    }, {
-                        subject_code: {
-                            [Op.like]: `%${search}%`
-                        }
-                    },
-                ]
-            } : {};
+        const whereClause = search ? {
+            [Op.or]: [
+                {
+                    subject_name: {
+                        [Op.like]: `%${search}%`
+                    }
+                }, {
+                    subject_code: {
+                        [Op.like]: `%${search}%`
+                    }
+                },
+            ]
+        } : {};
 
-            const {count, rows} = await Subject.findAndCountAll({
-                where: whereClause,
-                attributes: [
-                    "subject_id", "subject_name", "subject_code", "description",
-                ],
+        const {count, rows} = await Subject.findAndCountAll({
+            where: whereClause,
+            attributes: [
+                "subject_id", "subject_name", "subject_code", "description",
+            ],
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            order: [
+                ["subject_name", "ASC"]
+            ]
+        });
+
+        return sendSuccess(res, rows, "Subjects fetched successfully", 200, {
+            pagination: {
+                total: count,
+                page: parseInt(page),
                 limit: parseInt(limit),
-                offset: parseInt(offset),
-                order: [
-                    ["subject_name", "ASC"]
-                ]
-            });
-
-            return res.status(200).json({
-                success: true,
-                data: rows,
-                pagination: {
-                    total: count,
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    totalPages: Math.ceil(count / limit)
-                }
-            });
-        } catch (error) {
-            console.error("Error fetching subjects:", error);
-            return res.status(500).json({success: false, message: "Failed to fetch subjects", error: error.message});
-        }
-    }
+                totalPages: Math.ceil(count / limit)
+            }
+        });
+    });
 
     /**
-   * Get subjects for a specific class
-   * GET /subject/class/:classId
-   */
-    async getSubjectsByClass(req, res) {
-        try {
-            const {classId} = req.params;
+     * Get subjects for a specific class
+     * GET /subject/class/:classId
+     */
+    getSubjectsByClass = asyncHandler(async (req, res) => {
+        const {classId} = req.params;
 
-            const subjects = await Subject.findAll({
-                include: [
-                    {
-                        model: ClassSubject,
-                        as: "classSubjects",
-                        where: {
-                            class_id: classId
-                        },
-                        attributes: []
+        const subjects = await Subject.findAll({
+            include: [
+                {
+                    model: ClassSubject,
+                    as: "classSubjects",
+                    where: {
+                        class_id: classId
                     },
-                ],
-                attributes: ["subject_id", "subject_name", "subject_code"]
-            });
+                    attributes: []
+                },
+            ],
+            attributes: ["subject_id", "subject_name", "subject_code"]
+        });
 
-            return res.status(200).json({success: true, data: subjects});
-        } catch (error) {
-            console.error("Error fetching subjects by class:", error);
-            return res.status(500).json({success: false, message: "Failed to fetch subjects for class", error: error.message});
-        }
-    }
+        return sendSuccess(res, subjects, "Subjects fetched successfully");
+    });
 
     /**
    * Get class schedule (subjects organized by day of week)
    * GET /subject/schedule/:classId
    */
-    async getClassSchedule(req, res) {
-        try {
-            const {classId} = req.params;
+    getClassSchedule = asyncHandler(async (req, res) => {
+        const {classId} = req.params;
 
-            // Fetch class info
-            const Class = require("../models/Class");
-            const classInfo = await Class.findByPk(classId);
+        // Fetch class info
+        const Class = require("../models/Class");
+        const classInfo = await Class.findByPk(classId);
 
-            if (! classInfo) {
-                return res.status(404).json({success: false, message: "Class not found"});
-            }
+        if (!classInfo) {
+            return sendNotFound(res, "Class");
+        }
 
             // Fetch all subjects for this class with day_of_week
             const classSubjects = await ClassSubject.findAll({
@@ -145,19 +137,12 @@ class SubjectController { /**
             // Build schedule array
             const schedule = Array.from(scheduleMap.entries()).map(([dayOfWeek, subjects]) => ({day_of_week: dayOfWeek, day_name: dayNames[dayOfWeek], subjects: subjects}),);
 
-            return res.status(200).json({
-                success: true,
-                data: {
-                    class_id: classInfo.class_id,
-                    class_name: classInfo.class_name,
-                    schedule: schedule
-                }
-            });
-        } catch (error) {
-            console.error("Error fetching class schedule:", error);
-            return res.status(500).json({success: false, message: "Failed to fetch class schedule", error: error.message});
-        }
-    }
+            return sendSuccess(res, {
+                class_id: classInfo.class_id,
+                class_name: classInfo.class_name,
+                schedule: schedule
+            }, "Class schedule fetched successfully");
+    });
 
     /**
    * Get subjects for a specific class and day of week
@@ -244,86 +229,61 @@ class SubjectController { /**
     }
 
     /**
-   * Create a new subject
-   * POST /subject
-   */
-    async createSubject(req, res) {
-        try {
-            const {subject_name, subject_code, description} = req.body;
+     * Create a new subject
+     * POST /subject
+     */
+    createSubject = asyncHandler(async (req, res) => {
+        const {subject_name, subject_code, description} = req.body;
 
-            if (!subject_name || !subject_code) {
-                return res.status(400).json({success: false, message: "Subject name and code are required"});
-            }
-
-            const subject = await Subject.create({subject_name, subject_code, description});
-
-            return res.status(201).json({success: true, data: subject, message: "Subject created successfully"});
-        } catch (error) {
-            console.error("Error creating subject:", error);
-
-            if (error.name === "SequelizeUniqueConstraintError") {
-                return res.status(409).json({success: false, message: "Subject code already exists"});
-            }
-
-            return res.status(500).json({success: false, message: "Failed to create subject", error: error.message});
+        if (!subject_name || !subject_code) {
+            return sendError(res, "Subject name and code are required", 400);
         }
-    }
+
+        const subject = await Subject.create({subject_name, subject_code, description});
+
+        return sendSuccess(res, subject, "Subject created successfully", 201);
+    });
 
     /**
-   * Update a subject
-   * PUT /subject/:id
-   */
-    async updateSubject(req, res) {
-        try {
-            const {id} = req.params;
-            const {subject_name, subject_code, description} = req.body;
+     * Update a subject
+     * PUT /subject/:id
+     */
+    updateSubject = asyncHandler(async (req, res) => {
+        const {id} = req.params;
+        const {subject_name, subject_code, description} = req.body;
 
-            const subject = await Subject.findByPk(id);
+        const subject = await Subject.findByPk(id);
 
-            if (! subject) {
-                return res.status(404).json({success: false, message: "Subject not found"});
-            }
-
-            await subject.update({
-                subject_name: subject_name || subject.subject_name,
-                subject_code: subject_code || subject.subject_code,
-                description: description !== undefined ? description : subject.description
-            });
-
-            return res.status(200).json({success: true, data: subject, message: "Subject updated successfully"});
-        } catch (error) {
-            console.error("Error updating subject:", error);
-
-            if (error.name === "SequelizeUniqueConstraintError") {
-                return res.status(409).json({success: false, message: "Subject code already exists"});
-            }
-
-            return res.status(500).json({success: false, message: "Failed to update subject", error: error.message});
+        if (!subject) {
+            return sendNotFound(res, "Subject");
         }
-    }
+
+        await subject.update({
+            subject_name: subject_name || subject.subject_name,
+            subject_code: subject_code || subject.subject_code,
+            description: description !== undefined ? description : subject.description
+        });
+
+        return sendSuccess(res, subject, "Subject updated successfully");
+    });
 
     /**
-   * Delete a subject
-   * DELETE /subject/:id
-   */
-    async deleteSubject(req, res) {
-        try {
-            const {id} = req.params;
+     * Delete a subject
+     * DELETE /subject/:id
+     */
+    deleteSubject = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            const subject = await Subject.findByPk(id);
+        const subject = await Subject.findByPk(id);
 
-            if (! subject) {
-                return res.status(404).json({success: false, message: "Subject not found"});
-            }
-
-            await subject.destroy();
-
-            return res.status(200).json({success: true, message: "Subject deleted successfully"});
-        } catch (error) {
-            console.error("Error deleting subject:", error);
-            return res.status(500).json({success: false, message: "Failed to delete subject", error: error.message});
+        if (!subject) {
+            return sendNotFound(res, "Subject");
         }
-    }
+
+        await subject.destroy();
+
+        return sendSuccess(res, null, "Subject deleted successfully");
+    });
 
     /**
      * Assign a subject to a class for a specific day and time

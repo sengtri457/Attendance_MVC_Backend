@@ -3,13 +3,20 @@ const Teacher = require("../models/Teacher");
 const Class = require("../models/Class");
 const Subject = require("../models/Subject");
 const Attendance = require("../models/Attendance");
-const {validationResult} = require("express-validator");
 const {Op} = require("sequelize");
 const sequelize = require("../config/database");
+const {
+  sendSuccess,
+  sendError,
+  sendNotFound,
+  sendValidationError,
+  sendConflict,
+  asyncHandler,
+  checkValidation
+} = require("../middlewares/response.middleware");
 
 class AttendanceController {
-    async getAllAttendance(req, res) {
-        try {
+    getAllAttendance = asyncHandler(async (req, res) => {
             const {
                 page = 1,
                 limit = 20,
@@ -86,9 +93,7 @@ class AttendanceController {
                 ]
             });
 
-            res.status(200).json({
-                success: true,
-                data: rows,
+            return sendSuccess(res, rows, "Attendance records fetched successfully", 200, {
                 pagination: {
                     total: count,
                     page: parseInt(page),
@@ -96,117 +101,95 @@ class AttendanceController {
                     totalPages: Math.ceil(count / limit)
                 }
             });
-        } catch (error) {
-            console.error("Get all attendance error:", error);
-            res.status(500).json({success: false, message: "Error fetching attendance records", error: error.message});
-        }
-    }
+    });
 
     // Get attendance by ID
-    async getAttendanceById(req, res) {
-        try {
-            const {id} = req.params;
+    getAttendanceById = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            const attendance = await Attendance.findByPk(id, {
-                include: [
-                    {
-                        model: Student,
-                        as: "student",
-                        include: [
-                            {
-                                model: Class,
-                                as: "class"
-                            },
-                        ]
-                    }, {
-                        model: Subject,
-                        as: "subject"
-                    }, {
-                        model: Teacher,
-                        as: "teacher"
-                    },
-                ]
-            });
+        const attendance = await Attendance.findByPk(id, {
+            include: [
+                {
+                    model: Student,
+                    as: "student",
+                    include: [
+                        {
+                            model: Class,
+                            as: "class"
+                        },
+                    ]
+                }, {
+                    model: Subject,
+                    as: "subject"
+                }, {
+                    model: Teacher,
+                    as: "teacher"
+                },
+            ]
+        });
 
-            if (! attendance) {
-                return res.status(404).json({success: false, message: "Attendance record not found"});
-            }
-
-            res.status(200).json({success: true, data: attendance});
-        } catch (error) {
-            console.error("Get attendance by ID error:", error);
-            res.status(500).json({success: false, message: "Error fetching attendance record", error: error.message});
+        if (!attendance) {
+            return sendNotFound(res, "Attendance record");
         }
-    }
+
+        return sendSuccess(res, attendance, "Attendance record fetched successfully");
+    });
 
     // Create single attendance record
-    async createAttendance(req, res) {
-        try {
-            const errors = validationResult(req);
-            if (! errors.isEmpty()) {
-                return res.status(400).json({success: false, errors: errors.array()});
-            }
-
-            // Verify student exists
-            const student = await Student.findByPk(req.body.student_id);
-            if (! student) {
-                return res.status(404).json({success: false, message: "Student not found"});
-            }
-
-            // Verify teacher exists
-            const teacher = await Teacher.findByPk(req.body.teacher_id);
-            if (! teacher) {
-                return res.status(404).json({success: false, message: "Teacher not found"});
-            }
-
-            // Verify subject exists (now required)
-            const subject = await Subject.findByPk(req.body.subject_id);
-            if (! subject) {
-                return res.status(404).json({success: false, message: "Subject not found"});
-            }
-
-            const attendance = await Attendance.create(req.body);
-
-            const attendanceWithDetails = await Attendance.findByPk(attendance.attendance_id, {
-                include: [
-                    {
-                        model: Student,
-                        as: "student",
-                        include: [
-                            {
-                                model: Class,
-                                as: "class"
-                            }
-                        ]
-                    }, {
-                        model: Subject,
-                        as: "subject"
-                    }, {
-                        model: Teacher,
-                        as: "teacher"
-                    },
-                ]
-            },);
-
-            res.status(201).json({success: true, message: "Attendance recorded successfully", data: attendanceWithDetails});
-        } catch (error) {
-            console.error("Create attendance error:", error);
-
-            if (error.name === "SequelizeUniqueConstraintError") {
-                return res.status(409).json({success: false, message: "Attendance already recorded for this student, date, subject, and session"});
-            }
-
-            res.status(500).json({success: false, message: "Error creating attendance record", error: error.message});
+    createAttendance = asyncHandler(async (req, res) => {
+        if (!checkValidation(req, res)) {
+            return;
         }
-    }
+
+        // Verify student exists
+        const student = await Student.findByPk(req.body.student_id);
+        if (!student) {
+            return sendNotFound(res, "Student");
+        }
+
+        // Verify teacher exists
+        const teacher = await Teacher.findByPk(req.body.teacher_id);
+        if (!teacher) {
+            return sendNotFound(res, "Teacher");
+        }
+
+        // Verify subject exists (now required)
+        const subject = await Subject.findByPk(req.body.subject_id);
+        if (!subject) {
+            return sendNotFound(res, "Subject");
+        }
+
+        const attendance = await Attendance.create(req.body);
+
+        const attendanceWithDetails = await Attendance.findByPk(attendance.attendance_id, {
+            include: [
+                {
+                    model: Student,
+                    as: "student",
+                    include: [
+                        {
+                            model: Class,
+                            as: "class"
+                        }
+                    ]
+                }, {
+                    model: Subject,
+                    as: "subject"
+                }, {
+                    model: Teacher,
+                    as: "teacher"
+                },
+            ]
+        });
+
+        return sendSuccess(res, attendanceWithDetails, "Attendance recorded successfully", 201);
+    });
 
     // Bulk create attendance for multiple students (for one subject/session)
-    async bulkCreateAttendance(req, res) {
-        try {
-            const errors = validationResult(req);
-            if (! errors.isEmpty()) {
-                return res.status(400).json({success: false, errors: errors.array()});
-            }
+    bulkCreateAttendance = asyncHandler(async (req, res) => {
+        if (!checkValidation(req, res)) {
+            return;
+        }
 
             const {
                 teacher_id,
@@ -218,14 +201,14 @@ class AttendanceController {
 
             // Verify teacher exists
             const teacher = await Teacher.findByPk(teacher_id);
-            if (! teacher) {
-                return res.status(404).json({success: false, message: "Teacher not found"});
+            if (!teacher) {
+                return sendNotFound(res, "Teacher");
             }
 
             // Verify subject exists
             const subject = await Subject.findByPk(subject_id);
-            if (! subject) {
-                return res.status(404).json({success: false, message: "Subject not found"});
+            if (!subject) {
+                return sendNotFound(res, "Subject");
             }
 
             // Prepare attendance records
@@ -252,97 +235,79 @@ class AttendanceController {
             const successful = results.filter((r) => r.status === "fulfilled").length;
             const failed = results.filter((r) => r.status === "rejected").length;
 
-            res.status(201).json({
-                success: true,
-                message: `Bulk attendance recorded: ${successful} successful, ${failed} failed`,
+            return sendSuccess(res, {
                 summary: {
                     total: records.length,
                     successful,
                     failed
                 }
-            });
-        } catch (error) {
-            console.error("Bulk create attendance error:", error);
-            res.status(500).json({success: false, message: "Error creating bulk attendance records", error: error.message});
-        }
-    }
+            }, `Bulk attendance recorded: ${successful} successful, ${failed} failed`, 201);
+    });
 
     // Update attendance
-    async updateAttendance(req, res) {
-        try {
-            const {id} = req.params;
-            const errors = validationResult(req);
+    updateAttendance = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            if (! errors.isEmpty()) {
-                return res.status(400).json({success: false, errors: errors.array()});
-            }
-
-            const attendance = await Attendance.findByPk(id);
-
-            if (! attendance) {
-                return res.status(404).json({success: false, message: "Attendance record not found"});
-            }
-
-            await attendance.update(req.body);
-
-            const updatedAttendance = await Attendance.findByPk(id, {
-                include: [
-                    {
-                        model: Student,
-                        as: "student",
-                        include: [
-                            {
-                                model: Class,
-                                as: "class"
-                            }
-                        ]
-                    }, {
-                        model: Subject,
-                        as: "subject"
-                    }, {
-                        model: Teacher,
-                        as: "teacher"
-                    },
-                ]
-            });
-
-            res.status(200).json({success: true, message: "Attendance updated successfully", data: updatedAttendance});
-        } catch (error) {
-            console.error("Update attendance error:", error);
-            res.status(500).json({success: false, message: "Error updating attendance record", error: error.message});
+        if (!checkValidation(req, res)) {
+            return;
         }
-    }
+
+        const attendance = await Attendance.findByPk(id);
+
+        if (!attendance) {
+            return sendNotFound(res, "Attendance record");
+        }
+
+        await attendance.update(req.body);
+
+        const updatedAttendance = await Attendance.findByPk(id, {
+            include: [
+                {
+                    model: Student,
+                    as: "student",
+                    include: [
+                        {
+                            model: Class,
+                            as: "class"
+                        }
+                    ]
+                }, {
+                    model: Subject,
+                    as: "subject"
+                }, {
+                    model: Teacher,
+                    as: "teacher"
+                },
+            ]
+        });
+
+        return sendSuccess(res, updatedAttendance, "Attendance updated successfully");
+    });
 
     // Delete attendance
-    async deleteAttendance(req, res) {
-        try {
-            const {id} = req.params;
+    deleteAttendance = asyncHandler(async (req, res) => {
+        const {id} = req.params;
 
-            const attendance = await Attendance.findByPk(id);
+        const attendance = await Attendance.findByPk(id);
 
-            if (! attendance) {
-                return res.status(404).json({success: false, message: "Attendance record not found"});
-            }
-
-            await attendance.destroy();
-
-            res.status(200).json({success: true, message: "Attendance record deleted successfully"});
-        } catch (error) {
-            console.error("Delete attendance error:", error);
-            res.status(500).json({success: false, message: "Error deleting attendance record", error: error.message});
+        if (!attendance) {
+            return sendNotFound(res, "Attendance record");
         }
-    }
+
+        await attendance.destroy();
+
+        return sendSuccess(res, null, "Attendance record deleted successfully");
+    });
 
     // ==================== REPORTING METHODS ====================
 
     // Get daily attendance report
-    async getDailyReport(req, res) {
-        try {
-            const {date, class_id} = req.query;
+    getDailyReport = asyncHandler(async (req, res) => {
+        const {date, class_id} = req.query;
 
-            if (!date) {
-                return res.status(400).json({success: false, message: "Date parameter is required"});
-            }
+        if (!date) {
+            return sendError(res, "Date parameter is required", 400);
+        }
 
             const whereClause = {
                 attendance_date: date
@@ -423,31 +388,24 @@ class AttendanceController {
                 statusCounts[stat.status] = parseInt(stat.count);
             });
 
-            const totalRecords = Object.values(statusCounts).reduce((a, b) => a + b, 0,);
+            const totalRecords = Object.values(statusCounts).reduce((a, b) => a + b, 0);
 
-            res.status(200).json({
-                success: true,
-                data: {
-                    date,
-                    class_id: class_id || "all",
-                    records: attendanceRecords,
-                    statistics: {
-                        total: totalRecords,
-                        present: statusCounts.P,
-                        absent: statusCounts.A,
-                        late: statusCounts.L,
-                        excused: statusCounts.E,
-                        attendance_rate: totalRecords > 0 ? (
-                            (statusCounts.P / totalRecords) * 100
-                        ).toFixed(2) + "%" : "0%"
-                    }
+            return sendSuccess(res, {
+                date,
+                class_id: class_id || "all",
+                records: attendanceRecords,
+                statistics: {
+                    total: totalRecords,
+                    present: statusCounts.P,
+                    absent: statusCounts.A,
+                    late: statusCounts.L,
+                    excused: statusCounts.E,
+                    attendance_rate: totalRecords > 0 ? (
+                        (statusCounts.P / totalRecords) * 100
+                    ).toFixed(2) + "%" : "0%"
                 }
-            });
-        } catch (error) {
-            console.error("Daily report error:", error);
-            res.status(500).json({success: false, message: "Error generating daily report", error: error.message});
-        }
-    }
+            }, "Daily report generated successfully");
+    });
 
     // Get weekly attendance report
     async getWeeklyReport(req, res) {
