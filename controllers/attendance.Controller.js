@@ -6,101 +6,101 @@ const Attendance = require("../models/Attendance");
 const {Op} = require("sequelize");
 const sequelize = require("../config/database");
 const {
-  sendSuccess,
-  sendError,
-  sendNotFound,
-  sendValidationError,
-  sendConflict,
-  asyncHandler,
-  checkValidation
+    sendSuccess,
+    sendError,
+    sendNotFound,
+    sendValidationError,
+    sendConflict,
+    asyncHandler,
+    checkValidation
 } = require("../middlewares/response.middleware");
 
 class AttendanceController {
     getAllAttendance = asyncHandler(async (req, res) => {
-            const {
-                page = 1,
-                limit = 20,
-                student_id,
-                class_id,
-                date_from,
-                date_to,
-                status
-            } = req.query;
+        const {
+            page = 1,
+            limit = 20,
+            student_id,
+            class_id,
+            date_from,
+            date_to,
+            status
+        } = req.query;
 
-            const offset = (page - 1) * limit;
-            const whereClause = {};
+        const offset = (page - 1) * limit;
+        const whereClause = {};
 
-            if (student_id) 
-                whereClause.student_id = student_id;
+        if (student_id) 
+            whereClause.student_id = student_id;
+        
+
+
+        if (status) 
+            whereClause.status = status;
+        
+
+
+        if (date_from || date_to) {
+            whereClause.attendance_date = {};
+            if (date_from) 
+                whereClause.attendance_date[Op.gte] = date_from;
             
 
 
-            if (status) 
-                whereClause.status = status;
+            if (date_to) 
+                whereClause.attendance_date[Op.lte] = date_to;
             
 
 
-            if (date_from || date_to) {
-                whereClause.attendance_date = {};
-                if (date_from) 
-                    whereClause.attendance_date[Op.gte] = date_from;
-                
+        }
 
-
-                if (date_to) 
-                    whereClause.attendance_date[Op.lte] = date_to;
-                
-
-
-            }
-
-            const {count, rows} = await Attendance.findAndCountAll({
-                where: whereClause,
-                limit: parseInt(limit),
-                offset: parseInt(offset),
-                include: [
-                    {
-                        model: Student,
-                        as: "student",
-                        attributes: [
-                            "student_id", "student_name_kh", "student_name_eng", "class_id",
-                        ],
-                        ...(class_id && {
-                            where: {
-                                class_id: class_id
-                            }
-                        }),
-                        include: [
-                            {
-                                model: Class,
-                                as: "class",
-                                attributes: ["class_id", "class_code"]
-                            },
-                        ]
-                    }, {
-                        model: Teacher,
-                        as: "teacher",
-                        attributes: ["teacher_id", "teacher_name_eng"]
-                    },
+        const {count, rows} = await Attendance.findAndCountAll({
+            where: whereClause,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            include: [
+                {
+                    model: Student,
+                    as: "student",
+                    attributes: [
+                        "student_id", "student_name_kh", "student_name_eng", "class_id",
+                    ],
+                    ...(class_id && {
+                        where: {
+                            class_id: class_id
+                        }
+                    }),
+                    include: [
+                        {
+                            model: Class,
+                            as: "class",
+                            attributes: ["class_id", "class_code"]
+                        },
+                    ]
+                }, {
+                    model: Teacher,
+                    as: "teacher",
+                    attributes: ["teacher_id", "teacher_name_eng"]
+                },
+            ],
+            order: [
+                [
+                    "attendance_date", "DESC"
                 ],
-                order: [
-                    [
-                        "attendance_date", "DESC"
-                    ],
-                    [
-                        "created_at", "DESC"
-                    ],
-                ]
-            });
+                [
+                    "created_at", "DESC"
+                ],
+            ]
+        });
 
-            return sendSuccess(res, rows, "Attendance records fetched successfully", 200, {
-                pagination: {
-                    total: count,
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    totalPages: Math.ceil(count / limit)
-                }
-            });
+        return sendSuccess(res, rows, "Attendance records fetched successfully", 200, {
+            pagination: {
+                total: count,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                totalPages: Math.ceil(count / limit)
+            }
+        });
     });
 
     // Get attendance by ID
@@ -128,7 +128,7 @@ class AttendanceController {
             ]
         });
 
-        if (!attendance) {
+        if (! attendance) {
             return sendNotFound(res, "Attendance record");
         }
 
@@ -143,19 +143,19 @@ class AttendanceController {
 
         // Verify student exists
         const student = await Student.findByPk(req.body.student_id);
-        if (!student) {
+        if (! student) {
             return sendNotFound(res, "Student");
         }
 
         // Verify teacher exists
         const teacher = await Teacher.findByPk(req.body.teacher_id);
-        if (!teacher) {
+        if (! teacher) {
             return sendNotFound(res, "Teacher");
         }
 
         // Verify subject exists (now required)
         const subject = await Subject.findByPk(req.body.subject_id);
-        if (!subject) {
+        if (! subject) {
             return sendNotFound(res, "Subject");
         }
 
@@ -191,57 +191,57 @@ class AttendanceController {
             return;
         }
 
-            const {
-                teacher_id,
-                subject_id,
-                attendance_date,
-                session,
-                records
-            } = req.body;
+        const {
+            teacher_id,
+            subject_id,
+            attendance_date,
+            session,
+            records
+        } = req.body;
 
-            // Verify teacher exists
-            const teacher = await Teacher.findByPk(teacher_id);
-            if (!teacher) {
-                return sendNotFound(res, "Teacher");
+        // Verify teacher exists
+        const teacher = await Teacher.findByPk(teacher_id);
+        if (! teacher) {
+            return sendNotFound(res, "Teacher");
+        }
+
+        // Verify subject exists
+        const subject = await Subject.findByPk(subject_id);
+        if (! subject) {
+            return sendNotFound(res, "Subject");
+        }
+
+        // Prepare attendance records
+        const attendanceRecords = records.map((record) => ({
+            student_id: record.student_id,
+            teacher_id,
+            subject_id,
+            attendance_date,
+            session: session || "morning",
+            status: record.status || "P",
+            notes: record.notes || null
+        }));
+
+        // Use transaction for bulk insert
+        const results = await sequelize.transaction(async (t) => {
+            return await Promise.allSettled(attendanceRecords.map((record) => Attendance.upsert(record, {
+                conflictFields: [
+                    "student_id", "attendance_date", "subject_id", "session",
+                ],
+                transaction: t
+            }),),);
+        });
+
+        const successful = results.filter((r) => r.status === "fulfilled").length;
+        const failed = results.filter((r) => r.status === "rejected").length;
+
+        return sendSuccess(res, {
+            summary: {
+                total: records.length,
+                successful,
+                failed
             }
-
-            // Verify subject exists
-            const subject = await Subject.findByPk(subject_id);
-            if (!subject) {
-                return sendNotFound(res, "Subject");
-            }
-
-            // Prepare attendance records
-            const attendanceRecords = records.map((record) => ({
-                student_id: record.student_id,
-                teacher_id,
-                subject_id,
-                attendance_date,
-                session: session || "morning",
-                status: record.status || "P",
-                notes: record.notes || null
-            }));
-
-            // Use transaction for bulk insert
-            const results = await sequelize.transaction(async (t) => {
-                return await Promise.allSettled(attendanceRecords.map((record) => Attendance.upsert(record, {
-                    conflictFields: [
-                        "student_id", "attendance_date", "subject_id", "session",
-                    ],
-                    transaction: t
-                }),),);
-            });
-
-            const successful = results.filter((r) => r.status === "fulfilled").length;
-            const failed = results.filter((r) => r.status === "rejected").length;
-
-            return sendSuccess(res, {
-                summary: {
-                    total: records.length,
-                    successful,
-                    failed
-                }
-            }, `Bulk attendance recorded: ${successful} successful, ${failed} failed`, 201);
+        }, `Bulk attendance recorded: ${successful} successful, ${failed} failed`, 201);
     });
 
     // Update attendance
@@ -254,7 +254,7 @@ class AttendanceController {
 
         const attendance = await Attendance.findByPk(id);
 
-        if (!attendance) {
+        if (! attendance) {
             return sendNotFound(res, "Attendance record");
         }
 
@@ -290,7 +290,7 @@ class AttendanceController {
 
         const attendance = await Attendance.findByPk(id);
 
-        if (!attendance) {
+        if (! attendance) {
             return sendNotFound(res, "Attendance record");
         }
 
@@ -309,102 +309,102 @@ class AttendanceController {
             return sendError(res, "Date parameter is required", 400);
         }
 
-            const whereClause = {
-                attendance_date: date
-            };
+        const whereClause = {
+            attendance_date: date
+        };
 
-            const studentInclude = {
-                model: Student,
-                as: "student",
-                attributes: [
-                    "student_id", "student_name_kh", "student_name_eng", "class_id",
+        const studentInclude = {
+            model: Student,
+            as: "student",
+            attributes: [
+                "student_id", "student_name_kh", "student_name_eng", "class_id",
+            ],
+            include: [
+                {
+                    model: Class,
+                    as: "class",
+                    attributes: ["class_id", "class_code"]
+                },
+            ]
+        };
+
+        if (class_id) {
+            studentInclude.where = {
+                class_id: class_id
+            };
+        }
+
+        const attendanceRecords = await Attendance.findAll({
+            where: whereClause,
+            include: [
+                studentInclude, {
+                    model: Teacher,
+                    as: "teacher",
+                    attributes: ["teacher_id", "teacher_name_eng"]
+                }, {
+                    model: Subject,
+                    as: "subject",
+                    attributes: ["subject_id", "subject_name"]
+                },
+            ],
+            order: [
+                ["student", "student_name_eng", "ASC"]
+            ]
+        });
+
+        const stats = await Attendance.findAll({
+            where: whereClause,
+            attributes: [
+                "status",
+                [
+                    sequelize.fn("COUNT", sequelize.col("status")),
+                    "count"
                 ],
+            ],
+            ...(class_id && {
                 include: [
                     {
-                        model: Class,
-                        as: "class",
-                        attributes: ["class_id", "class_code"]
+                        model: Student,
+                        as: "student",
+                        attributes: [],
+                        where: {
+                            class_id: class_id
+                        }
                     },
                 ]
-            };
+            }),
+            group: ["status"],
+            raw: true
+        });
 
-            if (class_id) {
-                studentInclude.where = {
-                    class_id: class_id
-                };
+        const statusCounts = {
+            P: 0,
+            A: 0,
+            L: 0,
+            E: 0
+        };
+
+        stats.forEach((stat) => {
+            statusCounts[stat.status] = parseInt(stat.count);
+        });
+
+        const totalRecords = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+
+        return sendSuccess(res, {
+            date,
+            class_id: class_id || "all",
+            records: attendanceRecords,
+            statistics: {
+                total: totalRecords,
+                present: statusCounts.P,
+                absent: statusCounts.A,
+                late: statusCounts.L,
+                excused: statusCounts.E,
+                attendance_rate: totalRecords > 0 ? (
+                    (statusCounts.P / totalRecords) * 100
+                ).toFixed(2) + "%" : "0%"
             }
-
-            const attendanceRecords = await Attendance.findAll({
-                where: whereClause,
-                include: [
-                    studentInclude, {
-                        model: Teacher,
-                        as: "teacher",
-                        attributes: ["teacher_id", "teacher_name_eng"]
-                    }, {
-                        model: Subject,
-                        as: "subject",
-                        attributes: ["subject_id", "subject_name"]
-                    },
-                ],
-                order: [
-                    ["student", "student_name_eng", "ASC"]
-                ]
-            });
-
-            const stats = await Attendance.findAll({
-                where: whereClause,
-                attributes: [
-                    "status",
-                    [
-                        sequelize.fn("COUNT", sequelize.col("status")),
-                        "count"
-                    ],
-                ],
-                ...(class_id && {
-                    include: [
-                        {
-                            model: Student,
-                            as: "student",
-                            attributes: [],
-                            where: {
-                                class_id: class_id
-                            }
-                        },
-                    ]
-                }),
-                group: ["status"],
-                raw: true
-            });
-
-            const statusCounts = {
-                P: 0,
-                A: 0,
-                L: 0,
-                E: 0
-            };
-
-            stats.forEach((stat) => {
-                statusCounts[stat.status] = parseInt(stat.count);
-            });
-
-            const totalRecords = Object.values(statusCounts).reduce((a, b) => a + b, 0);
-
-            return sendSuccess(res, {
-                date,
-                class_id: class_id || "all",
-                records: attendanceRecords,
-                statistics: {
-                    total: totalRecords,
-                    present: statusCounts.P,
-                    absent: statusCounts.A,
-                    late: statusCounts.L,
-                    excused: statusCounts.E,
-                    attendance_rate: totalRecords > 0 ? (
-                        (statusCounts.P / totalRecords) * 100
-                    ).toFixed(2) + "%" : "0%"
-                }
-            }, "Daily report generated successfully");
+        }, "Daily report generated successfully");
     });
 
     // Get weekly attendance report
@@ -669,14 +669,10 @@ class AttendanceController {
             attendance_date: date
         };
 
-        const stats = await Attendance.findAll({
+        const records = await Attendance.findAll({
             where: whereClause,
             attributes: [
-                "status",
-                [
-                    sequelize.fn("COUNT", sequelize.col("status")),
-                    "count"
-                ],
+                "student_id", "status"
             ],
             ...(class_id && {
                 include: [
@@ -690,8 +686,16 @@ class AttendanceController {
                     },
                 ]
             }),
-            group: ["status"],
             raw: true
+        });
+
+        // Group by student to aggregate daily status
+        const studentMap = {};
+        records.forEach(r => {
+            if (! studentMap[r.student_id]) 
+                studentMap[r.student_id] = [];
+            
+            studentMap[r.student_id].push(r.status);
         });
 
         const result = {
@@ -702,11 +706,30 @@ class AttendanceController {
             E: 0,
             total: 0
         };
-        stats.forEach((s) => {
-            result[s.status] = parseInt(s.count);
-            result.total += parseInt(s.count);
+
+        Object.values(studentMap).forEach(statuses => {
+            let status = 'P';
+            // Default if strictly present
+            // Priority: Absent > Late > Excused > Present
+            if (statuses.includes('A')) 
+                status = 'A';
+             else if (statuses.includes('L')) 
+                status = 'L';
+             else if (statuses.includes('E')) 
+                status = 'E';
+             else if (statuses.every(s => s === 'P')) 
+                status = 'P';
+            
+            // If mixed without A/L/E (rare/impossible?), defaults to P or check logic.
+            // Logic mirrors frontend: if any A -> A.
+
+            if (result[status] !== undefined) {
+                result[status]++;
+                result.total ++;
+            }
         });
-        result.attendance_rate = result.total > 0 ? ((result.P / result.total) * 100).toFixed(1) + "%" : "0%";
+
+        result.attendance_rate = result.total > 0 ? ((result.P / result.total) * 100).toFixed(1) + "%" : "0.0%";
 
         return result;
     };
@@ -718,14 +741,10 @@ class AttendanceController {
             }
         };
 
-        const stats = await Attendance.findAll({
+        const records = await Attendance.findAll({
             where: whereClause,
             attributes: [
-                "status",
-                [
-                    sequelize.fn("COUNT", sequelize.col("status")),
-                    "count"
-                ],
+                "attendance_date", "student_id", "status"
             ],
             ...(class_id && {
                 include: [
@@ -739,8 +758,21 @@ class AttendanceController {
                     },
                 ]
             }),
-            group: ["status"],
             raw: true
+        });
+
+        // Group by date and student
+        const dailyStudentStatus = {}; // key: "date_studentId" -> [statuses]
+        records.forEach(r => {
+            const key = `${
+                r.attendance_date
+            }_${
+                r.student_id
+            }`;
+            if (! dailyStudentStatus[key]) 
+                dailyStudentStatus[key] = [];
+            
+            dailyStudentStatus[key].push(r.status);
         });
 
         const result = {
@@ -752,11 +784,27 @@ class AttendanceController {
             E: 0,
             total: 0
         };
-        stats.forEach((s) => {
-            result[s.status] = parseInt(s.count);
-            result.total += parseInt(s.count);
+
+        Object.values(dailyStudentStatus).forEach(statuses => {
+            let status = 'P';
+            // Priority: Absent > Late > Excused > Present
+            if (statuses.includes('A')) 
+                status = 'A';
+             else if (statuses.includes('L')) 
+                status = 'L';
+             else if (statuses.includes('E')) 
+                status = 'E';
+             else if (statuses.every(s => s === 'P')) 
+                status = 'P';
+            
+
+            if (result[status] !== undefined) {
+                result[status]++;
+                result.total ++;
+            }
         });
-        result.attendance_rate = result.total > 0 ? ((result.P / result.total) * 100).toFixed(1) + "%" : "0%";
+
+        result.attendance_rate = result.total > 0 ? ((result.P / result.total) * 100).toFixed(1) + "%" : "0.0%";
 
         return result;
     }
