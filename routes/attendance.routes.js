@@ -49,4 +49,8 @@ router.get("/reports/monthly", attendanceController.getMonthlyCalendar);
 router.get("/export/weekly-excel", attendanceController.exportWeeklyGridExcel);
 router.get("/reports/weekly-grid", attendanceController.getWeeklyGridMultiSubject,);
 router.get("/reports/dashboard", attendanceController.getDashboardSummary);
+
+// Submit a batch of attendance updates + trigger Telegram notification
+router.post("/submit-batch", attendanceController.submitBatch);
+
 module.exports = router;

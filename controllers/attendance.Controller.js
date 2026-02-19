@@ -1,3 +1,4 @@
+require('dotenv').config();
 const Student = require("../models/Student");
 const Teacher = require("../models/Teacher");
 const Class = require("../models/Class");
@@ -5,6 +6,7 @@ const Subject = require("../models/Subject");
 const Attendance = require("../models/Attendance");
 const {Op} = require("sequelize");
 const sequelize = require("../config/database");
+const axios = require("axios");
 const {
     sendSuccess,
     sendError,
@@ -14,6 +16,26 @@ const {
     asyncHandler,
     checkValidation
 } = require("../middlewares/response.middleware");
+
+// ── Telegram helper ───────────────────────────────────────────────────────────
+async function sendTelegramMessage(text) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (! token || ! chatId) 
+        return;
+    
+    // silently skip if not configured
+    try {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text,
+            parse_mode: 'Markdown'
+        });
+    } catch (err) {
+        console.error('[Telegram] Failed to send notification:', err ?. response ?. data || err.message);
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 class AttendanceController {
     getAllAttendance = asyncHandler(async (req, res) => {
@@ -242,6 +264,162 @@ class AttendanceController {
                 failed
             }
         }, `Bulk attendance recorded: ${successful} successful, ${failed} failed`, 201);
+    });
+
+    // ── Submit batch + Telegram notification ──────────────────────────────────
+    /**
+     * POST /api/v1/attendance/submit-batch
+     *
+     * Body:
+     * {
+     *   updates: [
+     *     { student_id, teacher_id, subject_id, attendance_date, status, force_update? }
+     *   ],
+     *   class_name?: string   // optional, used in the Telegram message
+     * }
+     *
+     * Saves all records (upsert) then sends a Telegram notification summarising
+     * the submission grouped by date → subject → status.
+     */
+    submitBatch = asyncHandler(async (req, res) => {
+        const {
+            updates = [],
+            class_name = 'Unknown Class'
+        } = req.body;
+
+        if (!Array.isArray(updates) || updates.length === 0) {
+            return sendError(res, 'updates array is required and must not be empty', 400);
+        }
+
+        // ── 1. Collect unique IDs so we can bulk-fetch names ─────────────────
+        const studentIds = [...new Set(updates.map(u => u.student_id))];
+        const subjectIds = [...new Set(updates.map(u => u.subject_id).filter(Boolean))];
+
+        const [students, subjects] = await Promise.all([
+            Student.findAll(
+                {
+                    where: {
+                        student_id: studentIds
+                    },
+                    attributes: ['student_id', 'student_name_eng']
+                }
+            ),
+            subjectIds.length ? Subject.findAll(
+                {
+                    where: {
+                        subject_id: subjectIds
+                    },
+                    attributes: ['subject_id', 'subject_name']
+                }
+            ) : Promise.resolve([]),
+        ]);
+
+        const studentMap = Object.fromEntries(students.map(s => [s.student_id, s.student_name_eng]));
+        const subjectMap = Object.fromEntries(subjects.map(s => [s.subject_id, s.subject_name]));
+
+        // ── 2. Upsert all records inside a transaction ────────────────────────
+        const results = await sequelize.transaction(async (t) => {
+            return Promise.allSettled(updates.map((u) => Attendance.upsert({
+                student_id: u.student_id,
+                teacher_id: u.teacher_id,
+                subject_id: u.subject_id || null,
+                attendance_date: u.attendance_date,
+                status: u.status,
+                session: u.session || 'morning',
+                notes: u.notes || null
+            }, {
+                conflictFields: [
+                    'student_id', 'attendance_date', 'subject_id', 'session'
+                ],
+                transaction: t
+            })));
+        });
+
+        const successful = results.filter(r => r.status === 'fulfilled').length;
+        const failed = results.filter(r => r.status === 'rejected').length;
+
+        // ── 3. Build Telegram message ─────────────────────────────────────────
+        // Group: date → subject → status → [student names]
+        const groups = {};
+        updates.forEach((u) => {
+            const date = u.attendance_date;
+            const subjectName = subjectMap[u.subject_id] || 'General';
+            const status = u.status;
+            const studentName = studentMap[u.student_id] || `Student #${
+                u.student_id
+            }`;
+
+            if (! groups[date]) 
+                groups[date] = {};
+            
+            if (! groups[date][subjectName]) 
+                groups[date][subjectName] = {};
+            
+            if (! groups[date][subjectName][status]) 
+                groups[date][subjectName][status] = [];
+            
+            groups[date][subjectName][status].push(studentName);
+        });
+
+        const formatDate = (d) => {
+            const obj = new Date(d);
+            return obj.toLocaleDateString('en-US', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric'
+            });
+        };
+
+        const statusEmoji = {
+            P: '✅',
+            A: '❌',
+            L: '⏰',
+            E: '📝'
+        };
+        const statusLabel = {
+            P: 'Present',
+            A: 'Absent',
+            L: 'Late',
+            E: 'Excused'
+        };
+
+        let message = `📢 *Attendance Submitted*\n\n🏫 Class: *${class_name}*\n👥 Total Records: *${
+            updates.length
+        }*`;
+
+        Object.entries(groups).forEach(([date, subjectObj]) => {
+            message += `\n\n📅 *${
+                formatDate(date)
+            }*`;
+            Object.entries(subjectObj).forEach(([subject, statusObj]) => {
+                message += `\n\n📚 *${subject}*`;
+                ['P', 'A', 'L', 'E'].forEach((s) => {
+                    const names = statusObj[s];
+                    if (names && names.length > 0) {
+                        message += `\n${
+                            statusEmoji[s]
+                        } *${
+                            statusLabel[s]
+                        } (${
+                            names.length
+                        }):*\n`;
+                        names.forEach((n) => (message += `  \\- ${n}\n`));
+                    }
+                });
+            });
+        });
+
+        // ── 4. Fire Telegram (non-blocking — don't fail the HTTP response) ────
+        sendTelegramMessage(message).catch(() => {});
+
+        // ── 5. Respond ────────────────────────────────────────────────────────
+        return sendSuccess(res, {
+            summary: {
+                total: updates.length,
+                successful,
+                failed
+            }
+        }, `Batch attendance submitted: ${successful} successful, ${failed} failed`, 201);
     });
 
     // Update attendance
@@ -695,6 +873,8 @@ class AttendanceController {
             if (! studentMap[r.student_id]) 
                 studentMap[r.student_id] = [];
             
+
+
             studentMap[r.student_id].push(r.status);
         });
 
@@ -720,6 +900,8 @@ class AttendanceController {
              else if (statuses.every(s => s === 'P')) 
                 status = 'P';
             
+
+
             // If mixed without A/L/E (rare/impossible?), defaults to P or check logic.
             // Logic mirrors frontend: if any A -> A.
 
@@ -772,6 +954,8 @@ class AttendanceController {
             if (! dailyStudentStatus[key]) 
                 dailyStudentStatus[key] = [];
             
+
+
             dailyStudentStatus[key].push(r.status);
         });
 
@@ -797,6 +981,7 @@ class AttendanceController {
              else if (statuses.every(s => s === 'P')) 
                 status = 'P';
             
+
 
             if (result[status] !== undefined) {
                 result[status]++;

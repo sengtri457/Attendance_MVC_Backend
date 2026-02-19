@@ -64,6 +64,7 @@ const subjectroute = require("./routes/subject.route");
 const classroute = require("./routes/class.routes");
 const attendanceRoute = require("./routes/attendance.routes");
 const authRoute = require("./routes/auth.routes");
+const telegramRoute = require("./routes/telegram.routes");
 
 const {verifyToken} = require("./middlewares/auth.middleware");
 
@@ -76,6 +77,7 @@ app.use("/api/v1/subject", verifyToken, subjectroute);
 app.use("/api/v1/class", verifyToken, classroute);
 app.use("/api/v1/attendance", verifyToken, attendanceRoute);
 app.use("/api/v1/auth", authRoute);
+app.use("/api/v1/telegram", verifyToken, telegramRoute);
 
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
@@ -84,7 +86,7 @@ app.use("/users", usersRouter);
 syncDatabase();
 
 // Import error handlers
-const { errorHandler, notFoundHandler } = require("./middlewares/handling");
+const {errorHandler, notFoundHandler} = require("./middlewares/handling");
 
 // catch 404 and forward to error handler
 app.use(notFoundHandler);
