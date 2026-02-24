@@ -65,6 +65,7 @@ const classroute = require("./routes/class.routes");
 const attendanceRoute = require("./routes/attendance.routes");
 const authRoute = require("./routes/auth.routes");
 const telegramRoute = require("./routes/telegram.routes");
+const userRoute = require("./routes/user.routes");
 
 const {verifyToken} = require("./middlewares/auth.middleware");
 
@@ -78,6 +79,7 @@ app.use("/api/v1/class", verifyToken, classroute);
 app.use("/api/v1/attendance", verifyToken, attendanceRoute);
 app.use("/api/v1/auth", authRoute);
 app.use("/api/v1/telegram", verifyToken, telegramRoute);
+app.use("/api/v1/user", verifyToken, userRoute);
 
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));

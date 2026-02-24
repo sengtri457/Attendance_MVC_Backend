@@ -8,7 +8,7 @@ const verifyToken = (req, res, next) => {
         return res.status(403).send("A token is required for authentication");
     }
 
-    try { // Remove 'Bearer ' prefix if present
+    try {
         const cleanToken = token.replace(/^Bearer\s+/, "");
         const decoded = jwt.verify(cleanToken, process.env.TOKEN_KEY || "secret_key");
         req.user = decoded;

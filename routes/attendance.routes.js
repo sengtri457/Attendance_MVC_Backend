@@ -48,6 +48,7 @@ router.get("/reports/monthly", attendanceController.getMonthlyCalendar);
 // GET /attendance/export/weekly-excel?start_date=2024-01-15&end_date=2024-01-19&class_id=1
 router.get("/export/weekly-excel", attendanceController.exportWeeklyGridExcel);
 router.get("/reports/weekly-grid", attendanceController.getWeeklyGridMultiSubject,);
+router.get("/reports/weekly-chart", attendanceController.getWeeklyChartData);
 router.get("/reports/dashboard", attendanceController.getDashboardSummary);
 
 // Submit a batch of attendance updates + trigger Telegram notification

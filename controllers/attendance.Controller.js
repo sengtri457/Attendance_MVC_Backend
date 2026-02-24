@@ -24,6 +24,8 @@ async function sendTelegramMessage(text) {
     if (! token || ! chatId) 
         return;
     
+
+
     // silently skip if not configured
     try {
         await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -352,12 +354,18 @@ class AttendanceController {
             if (! groups[date]) 
                 groups[date] = {};
             
+
+
             if (! groups[date][subjectName]) 
                 groups[date][subjectName] = {};
             
+
+
             if (! groups[date][subjectName][status]) 
                 groups[date][subjectName][status] = [];
             
+
+
             groups[date][subjectName][status].push(studentName);
         });
 
@@ -1556,6 +1564,150 @@ class AttendanceController {
             res.status(500).json({success: false, message: "Error generating schedule-based grid", error: error.message});
         }
     }
+
+    // Get weekly chart data for line chart
+    getWeeklyChartData = async (req, res) => {
+        try {
+            const {
+                class_id,
+                week_offset = 0
+            } = req.query;
+            const offset = parseInt(week_offset) || 0;
+
+            // Helper: format Date as YYYY-MM-DD using LOCAL timezone (not UTC)
+            const toLocalDate = (d) => {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            };
+
+            const dayNamesMap = [
+                "Sun",
+                "Mon",
+                "Tue",
+                "Wed",
+                "Thu",
+                "Fri",
+                "Sat"
+            ];
+
+            // Calculate the week's Monday and Sunday
+            const now = new Date();
+            const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon...
+            const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+            const monday = new Date(now);
+            monday.setDate(now.getDate() - diffToMonday + (offset * 7));
+            monday.setHours(0, 0, 0, 0);
+
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+
+            const startDate = toLocalDate(monday);
+            const endDate = toLocalDate(sunday);
+
+            // Generate all 7 days
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(monday);
+                d.setDate(monday.getDate() + i);
+                days.push(toLocalDate(d));
+            }
+
+            // Build where clause for attendance
+            const whereClause = {
+                attendance_date: {
+                    [Op.between]: [startDate, endDate]
+                }
+            };
+
+            // Include student filter for class_id
+            const includeClause = class_id ? [{
+                    model: Student,
+                    as: "student",
+                    attributes: [],
+                    where: {
+                        class_id: parseInt(class_id)
+                    }
+                }] : [];
+
+            // Get grouped stats
+            const stats = await Attendance.findAll({
+                where: whereClause,
+                include: includeClause,
+                attributes: [
+                    "attendance_date",
+                    "status",
+                    [
+                        sequelize.fn("COUNT", sequelize.col("Attendance.attendance_id")),
+                        "count"
+                    ]
+                ],
+                group: [
+                    "attendance_date", "status"
+                ],
+                raw: true
+            });
+
+            // Build daily data
+            const chartData = days.map((date, index) => {
+                const dayStats = stats.filter(s => s.attendance_date === date);
+                const P = dayStats.find(s => s.status === "P");
+                const A = dayStats.find(s => s.status === "A");
+                const L = dayStats.find(s => s.status === "L");
+                const E = dayStats.find(s => s.status === "E");
+
+                // Derive day name from actual date (not index)
+                const dateObj = new Date(date + 'T00:00:00');
+                const dayName = dayNamesMap[dateObj.getDay()];
+
+                return {
+                    date,
+                    day: dayName,
+                    present: P ? parseInt(P.count) : 0,
+                    absent: A ? parseInt(A.count) : 0,
+                    late: L ? parseInt(L.count) : 0,
+                    excused: E ? parseInt(E.count) : 0,
+                    total: (P ? parseInt(P.count) : 0) + (A ? parseInt(A.count) : 0) + (L ? parseInt(L.count) : 0) + (E ? parseInt(E.count) : 0)
+                };
+            });
+
+            // Calculate week totals
+            const weekTotals = chartData.reduce((acc, day) => ({
+                present: acc.present + day.present,
+                absent: acc.absent + day.absent,
+                late: acc.late + day.late,
+                excused: acc.excused + day.excused,
+                total: acc.total + day.total
+            }), {
+                present: 0,
+                absent: 0,
+                late: 0,
+                excused: 0,
+                total: 0
+            });
+
+            weekTotals.attendance_rate = weekTotals.total > 0 ? ((weekTotals.present / weekTotals.total) * 100).toFixed(1) + "%" : "0%";
+
+            res.status(200).json({
+                success: true,
+                data: {
+                    period: {
+                        start_date: startDate,
+                        end_date: endDate,
+                        week_offset: offset
+                    },
+                    chart_data: chartData,
+                    week_totals: weekTotals
+                }
+            });
+        } catch (error) {
+            console.error("Weekly chart data error:", error);
+            res.status(500).json({success: false, message: "Error generating weekly chart data", error: error.message});
+        }
+    };
+
     // Get dashboard summary statistics
     getDashboardSummary = async (req, res) => {
         try {

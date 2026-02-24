@@ -16,6 +16,18 @@ const User = sequelize.define("User", {
         type: Sequelize.STRING(255),
         allowNull: false
     },
+    email: {
+        type: Sequelize.STRING(100),
+        allowNull: true,
+        unique: true,
+        validate: {
+            isEmail: true
+        }
+    },
+    full_name: {
+        type: Sequelize.STRING(100),
+        allowNull: true
+    },
     role: {
         type: Sequelize.ENUM('admin', 'teacher', 'student'),
         allowNull: false

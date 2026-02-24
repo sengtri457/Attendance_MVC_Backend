@@ -1,12 +1,7 @@
 const {User, Student, Teacher} = require("../models/Index");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const {
-  sendSuccess,
-  sendError,
-  sendUnauthorized,
-  asyncHandler
-} = require("../middlewares/response.middleware");
+const {sendSuccess, sendError, sendUnauthorized, asyncHandler} = require("../middlewares/response.middleware");
 
 const register = asyncHandler(async (req, res) => {
     const {username, password, role, profile_id} = req.body;
@@ -15,12 +10,10 @@ const register = asyncHandler(async (req, res) => {
         return sendError(res, "All input is required", 400);
     }
 
-    const oldUser = await User.findOne({
-        where: {
+    const oldUser = await User.findOne({where: {
             username
-        }
-    });
-    
+        }});
+
     if (oldUser) {
         return sendError(res, "User Already Exist. Please Login", 409);
     }
@@ -28,12 +21,7 @@ const register = asyncHandler(async (req, res) => {
     // Encrypt password
     const encryptedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
-        username: username.toLowerCase(),
-        password: encryptedPassword,
-        role: role,
-        profile_id: profile_id
-    });
+    const user = await User.create({username: username.toLowerCase(), password: encryptedPassword, role: role, profile_id: profile_id});
 
     // Create token
     const token = jwt.sign({
@@ -43,7 +31,10 @@ const register = asyncHandler(async (req, res) => {
         profile_id: profile_id
     }, process.env.TOKEN_KEY || "secret_key", {expiresIn: "24h"});
 
-    return sendSuccess(res, {user, token}, "User registered successfully", 201);
+    return sendSuccess(res, {
+        user,
+        token
+    }, "User registered successfully", 201);
 });
 
 const login = asyncHandler(async (req, res) => {
@@ -59,8 +50,7 @@ const login = asyncHandler(async (req, res) => {
         }
     });
 
-    if (user && (await bcrypt.compare(password, user.password))) {
-        // Create token
+    if (user && (await bcrypt.compare(password, user.password))) { // Create token
         const token = jwt.sign({
             user_id: user.user_id,
             username: username,
@@ -79,13 +69,15 @@ const login = asyncHandler(async (req, res) => {
         return sendSuccess(res, {
             user_id: user.user_id,
             username: user.username,
+            email: user.email,
+            full_name: user.full_name,
             role: user.role,
             profile_id: user.profile_id,
             profile: profile,
             token: token
         }, "Login successful");
     }
-    
+
     return sendUnauthorized(res, "Invalid Credentials");
 });
 
