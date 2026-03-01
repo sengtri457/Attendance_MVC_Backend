@@ -1708,6 +1708,115 @@ class AttendanceController {
         }
     };
 
+    // Helper for Dashboard to get overall most present / absent subjects
+    getSubjectInsights = async (start_date, end_date, class_id) => {
+        try {
+            const {Op, fn, col} = require('sequelize');
+            const Attendance = require('../models/Attendance');
+            const Subject = require('../models/Subject');
+            const Student = require('../models/Student');
+
+            const where = {
+                attendance_date: {
+                    [Op.between]: [start_date, end_date]
+                }
+            };
+
+            const records = await Attendance.findAll({
+                attributes: [
+                    'subject_id',
+                    'status',
+                    [
+                        fn('COUNT', col('status')),
+                        'count'
+                    ]
+                ],
+                where,
+                include: [
+                    {
+                        model: Subject,
+                        as: "subject",
+                        attributes: ["subject_name", "subject_code"]
+                    }, {
+                        model: Student,
+                        as: "student",
+                        attributes: [],
+                        ...(class_id && {
+                            where: {
+                                class_id
+                            }
+                        })
+                    }
+                ],
+                group: [
+                    'subject_id',
+                    'status',
+                    'subject.subject_id',
+                    'subject.subject_name',
+                    'subject.subject_code'
+                ],
+                raw: true,
+                nest: true
+            });
+
+            const subjectMap = {};
+            records.forEach(r => {
+                const sId = r.subject_id;
+                if (! subjectMap[sId]) {
+                    subjectMap[sId] = {
+                        subject_id: sId,
+                        subject_name: r.subject.subject_name,
+                        subject_code: r.subject.subject_code,
+                        P: 0,
+                        A: 0,
+                        L: 0,
+                        E: 0,
+                        total: 0
+                    };
+                }
+                const count = parseInt(r.count, 10) || 0;
+                if (r.status === 'P') 
+                    subjectMap[sId].P += count;
+                 else if (r.status === 'A') 
+                    subjectMap[sId].A += count;
+                 else if (r.status === 'L') 
+                    subjectMap[sId].L += count;
+                 else if (r.status === 'E') 
+                    subjectMap[sId].E += count;
+                
+                subjectMap[sId].total += count;
+            });
+
+            const subjectStats = Object.values(subjectMap).map(s => {
+                s.attendance_rate = s.total > 0 ? ((s.P / s.total) * 100).toFixed(1) + "%" : "0.0%";
+                return s;
+            });
+
+            let mostPresent = null;
+            let mostAbsent = null;
+
+            if (subjectStats.length > 0) {
+                const validPresent = subjectStats.filter(s => s.P > 0);
+                if (validPresent.length) {
+                    mostPresent = validPresent.reduce((prev, current) => (prev.P > current.P) ? prev : current);
+                }
+                const validAbsent = subjectStats.filter(s => s.A > 0);
+                if (validAbsent.length) {
+                    mostAbsent = validAbsent.reduce((prev, current) => (prev.A > current.A) ? prev : current);
+                }
+            }
+
+            return {
+                stats: subjectStats, // We can limit this if needed
+                most_present_subject: mostPresent,
+                most_absent_subject: mostAbsent
+            };
+        } catch (error) {
+            console.error("getSubjectInsights error:", error);
+            return {stats: [], most_present_subject: null, most_absent_subject: null};
+        }
+    };
+
     // Get dashboard summary statistics
     getDashboardSummary = async (req, res) => {
         try {
@@ -1725,7 +1834,11 @@ class AttendanceController {
             // Get month stats (last 30 days)
             const monthStart = new Date(targetDate);
             monthStart.setDate(monthStart.getDate() - 29);
-            const monthStats = await this.getPeriodStats(monthStart.toISOString().split("T")[0], targetDate, class_id,);
+            const monthStartDateStr = monthStart.toISOString().split("T")[0];
+            const monthStats = await this.getPeriodStats(monthStartDateStr, targetDate, class_id,);
+
+            // Overall subject insights (for the month)
+            const subjectInsights = await this.getSubjectInsights(monthStartDateStr, targetDate, class_id);
 
             // Get students with low attendance (< 75%)
             const studentsAtRisk = await this.getStudentsAtRisk(class_id);
@@ -1769,6 +1882,7 @@ class AttendanceController {
                     this_month: monthStats,
                     students_at_risk: studentsAtRisk,
                     recent_absences: recentAbsences,
+                    subject_insights: subjectInsights,
                     generated_at: new Date().toISOString()
                 }
             });
@@ -2168,6 +2282,125 @@ class AttendanceController {
             res.status(500).json({success: false, message: "Error exporting attendance to Excel", error: error.message});
         }
     }
+
+    // ── Student Subject Stats ──────────────────────────────────────────────────
+    /**
+     * GET /api/v1/attendance/reports/student-subjects?student_id=X&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+     *
+     * Returns per-subject counts of P / A / L / E for a student,
+     * sorted so the frontend can easily find "most present" and "most absent".
+     */
+    getStudentSubjectStats = asyncHandler(async (req, res) => {
+        const {student_id, start_date, end_date} = req.query;
+
+        if (!student_id) {
+            return sendError(res, 'student_id parameter is required', 400);
+        }
+
+        // Verify student exists
+        const student = await Student.findByPk(student_id, {
+            attributes: ['student_id', 'student_name_eng', 'student_name_kh']
+        });
+        if (! student) {
+            return sendNotFound(res, 'Student');
+        }
+
+        // Build where clause
+        const whereClause = {
+            student_id
+        };
+        if (start_date && end_date) {
+            whereClause.attendance_date = {
+                [Op.between]: [start_date, end_date]
+            };
+        } else if (start_date) {
+            whereClause.attendance_date = {
+                [Op.gte]: start_date
+            };
+        } else if (end_date) {
+            whereClause.attendance_date = {
+                [Op.lte]: end_date
+            };
+        }
+
+        // Aggregate per subject + status
+        const rawStats = await Attendance.findAll({
+            where: whereClause,
+            attributes: [
+                'subject_id',
+                'status',
+                [
+                    sequelize.fn('COUNT', sequelize.col('status')),
+                    'count'
+                ],
+            ],
+            include: [
+                {
+                    model: Subject,
+                    as: 'subject',
+                    attributes: ['subject_id', 'subject_name', 'subject_code']
+                },
+            ],
+            group: [
+                'subject_id', 'status', 'subject.subject_id'
+            ],
+            raw: true
+        });
+
+        // Build a map: subject_id -> { subject_name, subject_code, P, A, L, E, total }
+        const subjectMap = {};
+
+        rawStats.forEach((row) => {
+            const sid = row['subject_id'];
+            if (! subjectMap[sid]) {
+                subjectMap[sid] = {
+                    subject_id: sid,
+                    subject_name: row['subject.subject_name'] || `Subject #${sid}`,
+                    subject_code: row['subject.subject_code'] || '',
+                    P: 0,
+                    A: 0,
+                    L: 0,
+                    E: 0,
+                    total: 0
+                };
+            }
+            const count = parseInt(row['count'], 10) || 0;
+            if (['P', 'A', 'L', 'E'].includes(row.status)) {
+                subjectMap[sid][row.status] += count;
+            }
+            subjectMap[sid].total += count;
+        });
+
+        // Convert to sorted arrays
+        const subjects = Object.values(subjectMap).map((s) => ({
+            ...s,
+            attendance_rate: s.total > 0 ? (
+                (s.P / s.total) * 100
+            ).toFixed(1) + '%' : '0.0%'
+        }));
+
+        // Most-present  = highest P count
+        // Most-absent   = highest A count
+        const byPresent = [... subjects].sort((a, b) => b.P - a.P);
+        const byAbsent = [... subjects].sort((a, b) => b.A - a.A);
+
+        return sendSuccess(res, {
+            student: {
+                student_id: student.student_id,
+                student_name_eng: student.student_name_eng,
+                student_name_kh: student.student_name_kh
+            },
+            period: {
+                start_date: start_date || null,
+                end_date: end_date || null
+            },
+            subjects,
+            most_present_subject: byPresent[0] || null,
+            most_absent_subject: byAbsent[0] || null,
+            by_present: byPresent,
+            by_absent: byAbsent
+        }, 'Student subject stats fetched successfully');
+    });
 }
 
 module.exports = new AttendanceController();

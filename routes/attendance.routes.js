@@ -51,6 +51,10 @@ router.get("/reports/weekly-grid", attendanceController.getWeeklyGridMultiSubjec
 router.get("/reports/weekly-chart", attendanceController.getWeeklyChartData);
 router.get("/reports/dashboard", attendanceController.getDashboardSummary);
 
+// Get per-subject P/A stats for a student
+// GET /attendance/reports/student-subjects?student_id=1&start_date=2024-01-01&end_date=2024-01-31
+router.get("/reports/student-subjects", attendanceController.getStudentSubjectStats);
+
 // Submit a batch of attendance updates + trigger Telegram notification
 router.post("/submit-batch", attendanceController.submitBatch);
 
