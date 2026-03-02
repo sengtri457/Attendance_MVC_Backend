@@ -37,6 +37,14 @@ const User = sequelize.define("User", {
         type: Sequelize.INTEGER,
         allowNull: true,
         comment: "Links to student_id or teacher_id based on role"
+    },
+    reset_password_token: {
+        type: Sequelize.STRING(255),
+        allowNull: true
+    },
+    reset_password_expire: {
+        type: Sequelize.DATE,
+        allowNull: true
     }
 }, {
     tableName: "users",
