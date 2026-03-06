@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Reference | Attendance System</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0f172a;
+            --bg-surface: rgba(30, 41, 59, 0.7);
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --accent: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+
+            --method-get: #10b981;
+            --method-post: #3b82f6;
+            --method-put: #f59e0b;
+            --method-delete: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.15), transparent 25%);
+            background-attachment: fixed;
+            display: flex;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-surface);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--border-color);
+            padding: 2rem 1.5rem;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        .logo {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 2.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .search {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: white;
+            width: 100%;
+            margin-bottom: 2rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .search:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .nav-group h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
+        .nav-group ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .nav-group li a {
+            color: var(--text-main);
+            text-decoration: none;
+            display: block;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            opacity: 0.8;
+        }
+
+        .nav-group li a:hover {
+            background: rgba(255, 255, 255, 0.05);
+            opacity: 1;
+            transform: translateX(4px);
+        }
+
+        /* Main Content */
+        .content {
+            margin-left: 280px;
+            flex: 1;
+            padding: 3rem 4rem;
+            max-width: 1200px;
+        }
+
+        .hero {
+            margin-bottom: 4rem;
+        }
+
+        .hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            line-height: 1.6;
+            max-width: 600px;
+        }
+
+        .endpoint-card {
+            background: var(--bg-surface);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .endpoint-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .method {
+            padding: 0.3rem 0.8rem;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .method.get {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--method-get);
+        }
+
+        .method.post {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--method-post);
+        }
+
+        .method.put {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--method-put);
+        }
+
+        .method.delete {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--method-delete);
+        }
+
+        .path {
+            font-family: 'Outfit', monospace;
+            font-size: 1.25rem;
+            color: #fff;
+        }
+
+        .description {
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        code.block {
+            display: block;
+            background: #0f172a;
+            padding: 1.2rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #38bdf8;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            margin-top: 1.5rem;
+            display: block;
+        }
+
+        hr.divider {
+            border: none;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+            margin: 4rem 0;
+        }
+
+        .auth-badge {
+            background: rgba(139, 92, 246, 0.15);
+            color: #c4b5fd;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        /* Smooth scroll behavior */
+        html {
+            scroll-behavior: smooth;
+        }
+    </style>
+</head>
+
+<body>
+
+    <aside class="sidebar">
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            API Space
+        </div>
+
+        <input type="text" class="search" placeholder="Search API...">
+
+        <div class="nav-group">
+            <h3>Getting Started</h3>
+            <ul>
+                <li><a href="#introduction">Introduction</a></li>
+                <li><a href="#authentication">Authentication</a></li>
+            </ul>
+        </div>
+
+        <div class="nav-group">
+            <h3>Endpoints</h3>
+            <ul>
+                <li><a href="#auth">Auth (/auth)</a></li>
+                <li><a href="#student">Student (/student)</a></li>
+                <li><a href="#attendance">Attendance (/attendance)</a></li>
+                <li><a href="#subject">Subject & Class</a></li>
+            </ul>
+        </div>
+    </aside>
+
+    <main class="content">
+        <section id="introduction" class="hero">
+            <h1>Attendance System API</h1>
+            <p>Welcome to the premium developer documentation for the Attendance tracking MVC network. This platform
+                allows programmatic management of students, schedules, and real-time class verification.</p>
+        </section>
+
+        <section id="authentication" class="endpoint-card">
+            <div class="endpoint-header">
+                <h2>🔐 Authentication Header</h2>
+            </div>
+            <p class="description">Most routes are heavily protected relying on modern JWT structures. Upon login,
+                include this token via the header on every subsequent request.</p>
+            <span class="code-title">HTTP Header Requirement</span>
+            <code class="block">Authorization: Bearer <your_jwt_token_here></code>
+        </section>
+
+        <hr class="divider">
+
+        <h2 style="margin-bottom: 2rem;" id="auth">1. Authentication Module</h2>
+
+        <section class="endpoint-card">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="path">/api/v1/auth/login</span>
+            </div>
+            <p class="description">Authenticate global user structures (students, teachers, admins) directly producing
+                system-verified tokens.</p>
+
+            <span class="code-title">Request Body Payload</span>
+            <code class="block">{
+  "username": "admin01",
+  "password": "securepassword123"
+}</code>
+
+            <span class="code-title">200 OK Response</span>
+            <code class="block" style="color: #6ee7b7;">{
+  "success": true,
+  "token": "eyJhbGciOiJIUz...",
+  "user": {
+    "user_id": 1,
+    "role": "admin",
+    "username": "admin01"
+  }
+}</code>
+        </section>
+
+        <hr class="divider">
+
+        <h2 style="margin-bottom: 2rem;" id="student">2. Student Registry</h2>
+
+        <section class="endpoint-card">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="path">/api/v1/student/:id</span>
+                <span class="auth-badge">🔒 Protected</span>
+            </div>
+            <p class="description">Access complex underlying detail for specific students registered throughout varying
+                database relations.</p>
+        </section>
+
+        <section class="endpoint-card">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="path">/api/v1/student/upload-excel</span>
+                <span class="auth-badge">🔒 Protected</span>
+            </div>
+            <p class="description">Initiate an immediate bulk insertion processing pipeline leveraging direct
+                <code>multipart/form-data</code> uploading standards targeting a valid <code>.xlsx</code> roster file.
+            </p>
+        </section>
+
+        <hr class="divider">
+
+        <h2 style="margin-bottom: 2rem;" id="attendance">3. Attendance Core Operations</h2>
+
+        <section class="endpoint-card">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="path">/api/v1/attendance/submit-batch</span>
+                <span class="auth-badge">🔒 Protected</span>
+            </div>
+            <p class="description">The foundational endpoint controlling sweeping end-of-class metrics. Accepts grouping
+                of multi-student evaluations simultaneously—triggering automated fallback analytics and integrated
+                Telegram relay dispatches effortlessly.</p>
+
+            <span class="code-title">Request Body Payload</span>
+            <code class="block">{
+  "teacher_id": 2,
+  "subject_id": 8,
+  "attendance_date": "2024-03-02",
+  "session": "morning",
+  "records": [
+    { "student_id": 1, "status": "P" },
+    { "student_id": 2, "status": "A", "notes": "Medical emergency" },
+    { "student_id": 3, "status": "L", "notes": "Traffic stall" }
+  ]
+}</code>
+        </section>
+
+        <section class="endpoint-card">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="path">/api/v1/attendance/reports/dashboard</span>
+                <span class="auth-badge">🔒 Protected</span>
+            </div>
+            <p class="description">Dynamically resolves critical system thresholds supplying pre-calculated performance
+                overviews mapped specifically for immediate high-level UI rending.</p>
+        </section>
+
+    </main>
+
+</body>
+
+</html>

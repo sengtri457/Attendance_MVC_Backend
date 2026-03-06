@@ -3,14 +3,6 @@ const axios = require('axios');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-
-/**
- * POST /api/v1/telegram/send
- * Body: { text: string, parse_mode?: string }
- *
- * Sends a Telegram message via the bot.
- * The bot token and chat ID are kept on the server (never exposed to the browser).
- */
 exports.sendMessage = async (req, res) => {
     try {
         if (! BOT_TOKEN || ! CHAT_ID) {

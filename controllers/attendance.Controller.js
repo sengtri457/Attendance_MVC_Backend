@@ -17,7 +17,7 @@ const {
     checkValidation
 } = require("../middlewares/response.middleware");
 
-// ── Telegram helper ───────────────────────────────────────────────────────────
+// ── Telegram
 async function sendTelegramMessage(text) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -26,7 +26,6 @@ async function sendTelegramMessage(text) {
     
 
 
-    // silently skip if not configured
     try {
         await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
             chat_id: chatId,
@@ -37,7 +36,6 @@ async function sendTelegramMessage(text) {
         console.error('[Telegram] Failed to send notification:', err ?. response ?. data || err.message);
     }
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
 class AttendanceController {
     getAllAttendance = asyncHandler(async (req, res) => {
@@ -267,22 +265,6 @@ class AttendanceController {
             }
         }, `Bulk attendance recorded: ${successful} successful, ${failed} failed`, 201);
     });
-
-    // ── Submit batch + Telegram notification ──────────────────────────────────
-    /**
-     * POST /api/v1/attendance/submit-batch
-     *
-     * Body:
-     * {
-     *   updates: [
-     *     { student_id, teacher_id, subject_id, attendance_date, status, force_update? }
-     *   ],
-     *   class_name?: string   // optional, used in the Telegram message
-     * }
-     *
-     * Saves all records (upsert) then sends a Telegram notification summarising
-     * the submission grouped by date → subject → status.
-     */
     submitBatch = asyncHandler(async (req, res) => {
         const {
             updates = [],
